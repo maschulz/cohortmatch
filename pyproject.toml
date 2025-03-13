@@ -1,0 +1,173 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cohortmatch"
+version = "0.1.0"
+description = "Statistical matching for cohort studies, from small samples to biobank scale"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Marc-Andre Schulz", email = "marc.a.schulz@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "pandas>=1.3.0",
+    "scipy>=1.7.0",
+    "scikit-learn>=1.0.0",
+    "statsmodels>=0.13.0",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "black>=23.0.0",
+    "ruff>=0.0.265",
+    "mypy>=1.0.0",
+]
+viz = [
+    "matplotlib>=3.5.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/maschulz/cohortmatch"
+"Bug Tracker" = "https://github.com/maschulz/cohortmatch/issues"
+"Source Code" = "https://github.com/maschulz/cohortmatch"
+"Changelog" = "https://github.com/maschulz/cohortmatch/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["cohortmatch*"]
+
+[tool.setuptools.package-data]
+cohortmatch = ["py.typed", "data/*.csv"]
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py310"
+extend-include = ["*.ipynb"]
+exclude = [
+  ".git",
+  "__pycache__",
+  "build",
+  "dist",
+  ".venv",
+  "env",
+]
+
+# Curated rule set (not select=ALL): the checks that catch real problems and
+# that the code is held to. The formatter owns code width, so E501 is off.
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = [
+  "E501",  # line length is enforced by the formatter for code; prose is exempt
+  "C408",  # dict(a=1) reads well for kwargs-style construction
+]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+# NullHandler is registered before the submodule imports (quiet by default).
+"cohortmatch/__init__.py" = ["E402"]
+# Report scripts put the repo root on sys.path before importing the package.
+"validation/report.py" = ["E402"]
+"benchmarks/report.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cohortmatch"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = 88
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pandas.*",
+    "numpy.*",
+    "scipy.*",
+    "sklearn.*",
+    "matplotlib.*",
+    "statsmodels.*",
+    "xgboost.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --cov=cohortmatch --cov-report=term-missing"
+filterwarnings = [
+    "ignore::DeprecationWarning:matplotlib.*:",
+    "ignore::DeprecationWarning:numpy.*:",
+    "ignore::UserWarning:scipy.*:"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests that require external resources"
+]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64", "linux-64"]
+
+[tool.pixi.dependencies]
+numpy = ">=1.20.0"
+pandas = ">=1.3.0"
+scipy = ">=1.7.0"
+scikit-learn = ">=1.0.0"
+statsmodels = ">=0.13.0"
+tqdm = "*"
+ipykernel = ">=6.30.1,<8"
+
+[tool.pixi.pypi-dependencies]
+cohortmatch = { path = ".", editable = true, extras = ["dev", "viz"] }
+
+[tool.pixi.feature.py310.dependencies]
+python = "3.10.*"
+[tool.pixi.feature.py311.dependencies]
+python = "3.11.*"
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+[tool.pixi.feature.py313.dependencies]
+python = "3.13.*"
+
+[tool.pixi.environments]
+default = ["py312"]
+py310 = ["py310"]
+py311 = ["py311"]
+py313 = ["py313"]
+
+[tool.pixi.tasks]
+test = "pytest"
+test-fast = "pytest -m 'not slow'"
+lint = "ruff check ."
+fmt = "ruff format ."
+fmt-check = "ruff format --check ."
+typecheck = "mypy cohortmatch"

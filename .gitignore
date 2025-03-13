@@ -1,0 +1,101 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+.venv
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Data files
+*.csv
+*.xls
+*.xlsx
+*.db
+*.sqlite
+*.h5
+*.pkl
+*.npy
+*.npz
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+.DS_Store
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+*.cover
+*.py,cover
+
+# Documentation
+docs/_build/
+docs/generated/
+
+# Project specific
+output/
+results/
+figures/
+plots/
+*.png
+*.jpg
+*.pdf
+*.model
+
+# Environment variables and secrets
+.env
+.env.*
+*.key
+secrets.yaml
+config.local.yaml
+
+# Profiling and debugging
+*.prof
+*.stats
+*.lprof
+.mypy_cache/ 
+# local tooling
+uv.lock
+.venv/
+.pixi/
+.ruff_cache/
+love_plot.png
+
+# keep bundled datasets (the *.csv rule above would exclude them)
+!cohortmatch/data/*.csv
