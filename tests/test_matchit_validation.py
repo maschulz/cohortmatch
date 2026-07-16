@@ -1,0 +1,279 @@
+"""Golden-value validation against R's MatchIt/cobalt on the Lalonde data.
+
+`validation/generate_golden.R` fits one full-sample logistic propensity model
+and exports its scores; both sides then match on those identical scores, so
+these tests compare the matching and the diagnostics, not propensity
+estimation.
+
+Comparison tightness varies by design:
+- Unadjusted SMDs: exact (1e-6) — same data, same convention, no matching.
+- Optimal matching: our exact Hungarian total may be marginally better than
+  optmatch's tolerance-bounded solve, never worse.
+- Nearest 1:1 and 1:2 (no competition for controls): counts exact and
+  post-matching SMDs within 0.05 of MatchIt's.
+- Caliper and exact designs (matching order matters under competition):
+  counts within a small margin, aggregate balance quality no worse than
+  MatchIt's by more than 0.05 mean |SMD|, ATT within half a standard error.
+
+Requires validation/golden.json (generated in CI, or locally with R +
+MatchIt + cobalt installed); tests skip when it is absent.
+"""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from cohortmatch import cem, match, subclassify
+from cohortmatch.datasets import load_lalonde
+
+GOLDEN_PATH = Path(__file__).parent.parent / "validation" / "golden.json"
+
+pytestmark = pytest.mark.skipif(
+    not GOLDEN_PATH.exists(),
+    reason="validation/golden.json not present (run validation/generate_golden.R)",
+)
+
+
+@pytest.fixture(scope="module")
+def golden():
+    return json.loads(GOLDEN_PATH.read_text())
+
+
+@pytest.fixture(scope="module")
+def lalonde(golden):
+    data = load_lalonde()
+    ps = pd.Series(golden["ps"], name="ps")
+    assert set(ps.index) == set(data.index)
+    data = data.join(ps)
+    return data
+
+
+COVS = ["age", "educ", "black", "hispan", "married", "nodegree", "re74", "re75"]
+
+
+def run_design(lalonde, golden, name, **kwargs):
+    raw_caliper = None
+    if name == "nearest_caliper":
+        # MatchIt standardizes calipers by the SD of the raw distance measure;
+        # pass the equivalent raw threshold to both implementations.
+        raw_caliper = 0.2 * golden["sd_ps"]
+        kwargs.update(caliper=raw_caliper, std_caliper=False)
+    return match(
+        lalonde,
+        treatment="treat",
+        covariates=COVS,
+        propensity_scores="ps",
+        estimand="att",
+        engine="exact",
+        **kwargs,
+    )
+
+
+class TestUnadjustedBalance:
+    def test_smd_before_matches_cobalt_exactly(self, lalonde, golden):
+        result = run_design(lalonde, golden, "nearest_1to1")
+        balance = result.balance().set_index("variable")
+        for cov, expected in golden["unadjusted_smd"].items():
+            assert balance.loc[cov, "smd_before"] == pytest.approx(
+                expected, abs=1e-6
+            ), f"unadjusted SMD mismatch for {cov}"
+
+
+class TestOptimal:
+    def test_counts_and_total_distance(self, lalonde, golden):
+        g = golden["designs"]["optimal_1to1"]
+        result = run_design(lalonde, golden, "optimal_1to1", method="optimal")
+        matched = result.matched_data
+        assert (matched["treat"] == 1).sum() == g["n_treated"]
+        assert (matched["treat"] == 0).sum() == g["n_control"]
+
+        pairs = result.pairs
+        ps = lalonde["ps"]
+        total = sum(
+            abs(ps[row["treatment_id"]] - ps[row["control_id"]])
+            for _, row in pairs.iterrows()
+        )
+        # our Hungarian solve is exact; optmatch stops within a tolerance
+        assert total <= g["total_ps_distance"] + 1e-9
+        assert g["total_ps_distance"] - total < 0.01
+
+
+class TestNearestDesigns:
+    @pytest.mark.parametrize(
+        "name,kwargs",
+        [
+            ("nearest_1to1", {}),
+            ("nearest_1to2", {"ratio": 2}),
+        ],
+    )
+    def test_uncontested_designs_reconcile_tightly(self, lalonde, golden, name, kwargs):
+        g = golden["designs"][name]
+        result = run_design(lalonde, golden, name, **kwargs)
+        matched = result.matched_data
+        assert (matched["treat"] == 1).sum() == g["n_treated"]
+        assert (matched["treat"] == 0).sum() == g["n_control"]
+
+        balance = result.balance().set_index("variable")
+        for cov, expected in g["smd_after"].items():
+            assert balance.loc[cov, "smd_after"] == pytest.approx(expected, abs=0.05), (
+                f"{name}: post-matching SMD for {cov} deviates from MatchIt"
+            )
+
+        effects = result.estimate_effects("re78")
+        assert effects["effect"].iloc[0] == pytest.approx(
+            g["att"], abs=max(250, 0.5 * g["att_se"])
+        )
+        assert effects["standard_error"].iloc[0] == pytest.approx(g["att_se"], rel=0.25)
+
+    @pytest.mark.parametrize(
+        "name,kwargs",
+        [
+            ("nearest_caliper", {}),
+            ("nearest_exact_race", {"exact": "race"}),
+        ],
+    )
+    def test_contested_designs_reconcile_in_quality(
+        self, lalonde, golden, name, kwargs
+    ):
+        # matching order determines which units drop and which pairs form
+        # when controls are contested; compare counts and balance quality,
+        # not the specific pairs
+        g = golden["designs"][name]
+        with pytest.warns(UserWarning):
+            result = run_design(lalonde, golden, name, **kwargs)
+        matched = result.matched_data
+
+        n_treated = (matched["treat"] == 1).sum()
+        assert n_treated == pytest.approx(g["n_treated"], abs=5)
+
+        balance = result.balance().set_index("variable")
+        ours = balance.loc[list(g["smd_after"]), "smd_after"].abs().mean()
+        matchit = np.mean([abs(v) for v in g["smd_after"].values()])
+        assert ours <= matchit + 0.05, (
+            f"{name}: mean |SMD| {ours:.3f} worse than MatchIt's {matchit:.3f} + 0.05"
+        )
+
+        effects = result.estimate_effects("re78")
+        assert effects["effect"].iloc[0] == pytest.approx(
+            g["att"], abs=max(250, 0.5 * g["att_se"])
+        )
+
+    def test_weights_sum_matches(self, lalonde, golden):
+        g = golden["designs"]["nearest_1to2"]
+        result = run_design(lalonde, golden, "nearest_1to2", ratio=2)
+        controls = result.matched_data.index[result.matched_data["treat"] == 0]
+        assert result.weights[controls].sum() == pytest.approx(
+            g["sum_weights_control"], rel=1e-6
+        )
+
+
+class TestSubclassification:
+    def test_subclass_reconciles(self, lalonde, golden):
+        if "subclass_6" not in golden["designs"]:
+            pytest.skip("golden.json predates the subclass design")
+        g = golden["designs"]["subclass_6"]
+        result = subclassify(
+            lalonde,
+            treatment="treat",
+            covariates=COVS,
+            propensity_scores="ps",
+            n_subclasses=6,
+            estimand="att",
+        )
+        matched = result.matched_data
+        assert (matched["treat"] == 1).sum() == pytest.approx(g["n_treated"], rel=0.01)
+        assert (matched["treat"] == 0).sum() == pytest.approx(g["n_control"], rel=0.01)
+
+        controls = matched.index[matched["treat"] == 0]
+        assert result.weights[controls].sum() == pytest.approx(
+            g["sum_weights_control"], rel=0.01
+        )
+
+        balance = result.balance().set_index("variable")
+        for cov, expected in g["smd_after"].items():
+            assert balance.loc[cov, "smd_after"] == pytest.approx(expected, abs=0.02), (
+                f"subclass: post-stratification SMD for {cov} deviates"
+            )
+
+        effects = result.estimate_effects("re78")
+        assert effects["effect"].iloc[0] == pytest.approx(
+            g["att"], abs=0.5 * g["att_se"]
+        )
+
+
+class TestCovariateAndEffectGolden:
+    """Golden reconciliation for covariate-distance, CEM, and GLM effects —
+    the features previously validated only internally."""
+
+    def test_mahalanobis_reconciles(self, lalonde, golden):
+        if "nearest_mahalanobis" not in golden["designs"]:
+            pytest.skip("golden.json predates the mahalanobis design")
+        g = golden["designs"]["nearest_mahalanobis"]
+        result = match(
+            lalonde,
+            treatment="treat",
+            covariates=COVS,
+            distance="mahalanobis",
+            estimand="att",
+            random_state=0,
+        )
+        matched = result.matched_data
+        assert (matched["treat"] == 1).sum() == g["n_treated"]
+        assert (matched["treat"] == 0).sum() == g["n_control"]
+        # matching order under contested controls differs; compare aggregate
+        # balance quality (both use Mahalanobis, incl. the weak race balance)
+        bal = result.balance().set_index("variable")
+        ours = bal.loc[COVS, "smd_after"].abs().mean()
+        matchit = np.mean([abs(v) for v in g["smd_after"].values()])
+        assert ours <= matchit + 0.05
+
+    def test_cem_reconciles(self, lalonde, golden):
+        if "cem_fixed" not in golden["designs"]:
+            pytest.skip("golden.json predates the cem design")
+        g = golden["designs"]["cem_fixed"]
+        result = cem(
+            lalonde,
+            treatment="treat",
+            covariates=["age", "educ", "re74", "re75"],
+            coarsening={
+                "age": [25, 35, 45],
+                "educ": [8, 11],
+                "re74": [5000, 15000],
+                "re75": [5000, 15000],
+            },
+            estimand="att",
+        )
+        matched = result.matched_data
+        # identical coarsening should retain the same units (edge-inclusivity
+        # can differ by a unit or two at bin boundaries)
+        assert (matched["treat"] == 1).sum() == pytest.approx(g["n_treated"], abs=3)
+        controls = matched.index[matched["treat"] == 0]
+        assert result.weights[controls].sum() == pytest.approx(
+            g["sum_weights_control"], rel=0.05
+        )
+
+    def test_logistic_effect_reconciles(self, lalonde, golden):
+        # pure estimator reconciliation: same data, same (unit) weights, no
+        # matching in between, so our weighted logistic OR + HC1 sandwich must
+        # match R's glm + vcovHC tightly
+        if "logistic_effect" not in golden["designs"]:
+            pytest.skip("golden.json predates the logistic_effect design")
+        from cohortmatch.metrics.treatment import estimate_treatment_effect
+
+        g = golden["designs"]["logistic_effect"]
+        d = lalonde.assign(emp=(lalonde["re78"] > 0).astype(int))
+        eff = estimate_treatment_effect(
+            d,
+            "emp",
+            "treat",
+            family="logistic",
+            estimand="att",
+        )
+        # OR matches R exactly; the SE differs by the HC1 finite-sample factor
+        # sqrt(n/(n-k)) ~ 0.16% because statsmodels' GLM cov_type="HC1" returns
+        # HC0 (documented in DESIGN.md), so reconcile the SE within that margin
+        assert eff["effect"] == pytest.approx(g["odds_ratio"], rel=1e-4)
+        assert eff["standard_error"] == pytest.approx(g["se"], rel=0.01)

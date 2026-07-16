@@ -1,0 +1,19 @@
+[workspace]
+authors = ["Marc-Andre Schulz <marc.a.schulz@gmail.com>"]
+channels = ["conda-forge"]
+name = "validation"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+r-base = ">=4.5.3,<4.6"
+r-matchit = ">=4.7.2,<5"
+r-cobalt = ">=4.6.3,<5"
+r-sandwich = ">=3.1_2,<4"
+r-lmtest = ">=0.9_40,<0.10"
+r-jsonlite = ">=2.0.0,<3"
+c-compiler = ">=1.11.0,<2"
+fortran-compiler = ">=1.11.0,<2"
+make = ">=4.4.1,<5"
