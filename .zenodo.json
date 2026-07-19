@@ -1,0 +1,9 @@
+{
+  "title": "cohortmatch: statistical matching for cohort studies at scale",
+  "upload_type": "software",
+  "license": "MIT",
+  "creators": [{"name": "Schulz, Marc-Andre"}],
+  "keywords": ["propensity score matching", "causal inference",
+               "nested case-control", "incidence-density sampling",
+               "epidemiology", "scikit-learn"]
+}

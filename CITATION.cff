@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: "cohortmatch: statistical matching for cohort studies at scale"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Schulz
+    given-names: Marc-Andre
+repository-code: "https://github.com/maschulz/cohortmatch"
+license: MIT
+version: 0.1.0
+date-released: "2026-07-19"
+keywords:
+  - propensity score matching
+  - causal inference
+  - nested case-control
+  - epidemiology

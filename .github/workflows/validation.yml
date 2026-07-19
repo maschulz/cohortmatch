@@ -1,0 +1,61 @@
+name: MatchIt validation
+
+# Regenerates golden values against the LATEST R/MatchIt/cobalt (external
+# drift detection). The comparisons against the committed golden.json run in
+# the normal Python test suite on every push.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            cran::MatchIt
+            cran::cobalt
+            cran::optmatch
+            cran::sandwich
+            cran::lmtest
+            cran::jsonlite
+
+      - name: Generate golden values with MatchIt
+        run: Rscript validation/generate_golden.R
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cohortmatch
+        run: pip install -e ".[dev]"
+
+      - name: Validate against MatchIt (Lalonde)
+        run: pytest tests/test_matchit_validation.py -v
+
+      - name: Generate at-scale reference (20k x 480k)
+        run: |
+          python validation/make_scale_cohort.py /tmp/scale_cohort.csv
+          Rscript validation/validate_scale.R /tmp/scale_cohort.csv validation/golden_scale.json
+
+      - name: Validate at scale
+        run: pytest tests/test_matchit_scale.py -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: golden-json
+          path: validation/golden.json
