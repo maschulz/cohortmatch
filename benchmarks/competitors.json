@@ -1,0 +1,27 @@
+{
+  "measured": "2026-07-19",
+  "machine": "Apple Silicon (M-series), macOS",
+  "rows": [
+    {
+      "package": "R MatchIt 4.7.2",
+      "design": "propensity NN + caliper",
+      "time": "1.6 s",
+      "memory": "1.4 GB",
+      "notes": "C++ nearest-neighbor"
+    },
+    {
+      "package": "R MatchIt 4.7.2",
+      "design": "Mahalanobis NN",
+      "time": "70 s",
+      "memory": "0.58 GB",
+      "notes": "brute-force per unit"
+    },
+    {
+      "package": "psmpy 0.3.13",
+      "design": "propensity kNN",
+      "time": "n/a",
+      "memory": "n/a",
+      "notes": "OOM-killed at this scale (57 s at 2k×38k)"
+    }
+  ]
+}
