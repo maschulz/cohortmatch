@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'pyproject.toml'
+      - 'cohortmatch/**'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'pyproject.toml'
+      - 'cohortmatch/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install build wheel twine
+    
+    - name: Build package
+      run: |
+        python -m build
+    
+    - name: Check package with twine
+      run: |
+        python -m twine check dist/*
+    
+    - name: Upload package artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-packages
+        path: dist/
+        retention-days: 7 
