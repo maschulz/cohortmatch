@@ -12,6 +12,7 @@ import pandas as pd
 from scipy.special import logit
 
 from cohortmatch.datatypes import MatcherConfig, MatchResults
+from cohortmatch.matching._utils import warn_if_pool_keys_tie
 from cohortmatch.matching.covariate_nn import covariate_nn_match
 from cohortmatch.matching.distances import calculate_distance_matrix
 from cohortmatch.matching.fast_greedy import fast_greedy_match
@@ -311,6 +312,21 @@ def _perform_matching(
     """Compute distances, apply calipers, and run the matching algorithm."""
     algorithm_treatment_indices = data.index[treatment_mask].tolist()
     algorithm_control_indices = data.index[~treatment_mask].tolist()
+
+    # Duplicate matching keys in the pool guarantee exact ties, which the
+    # default tie policy resolves by input row order (see matching/_utils.py).
+    if config.distance_method in ("propensity", "logit"):
+        pool_keys = (
+            propensity_scores[~treatment_mask]
+            if propensity_scores is not None
+            else None
+        )
+    elif config.covariates:
+        pool_keys = data[config.covariates].to_numpy()[~treatment_mask]
+    else:
+        pool_keys = None
+    warn_if_pool_keys_tie(pool_keys, config.tie_break)
+
     distance_matrix_for_results = None
     dm_anchor_ids = None
     dm_pool_ids = None
@@ -454,6 +470,8 @@ def _perform_matching(
                 exact_match_cols=config.exact_match_cols,
                 ratio=config.ratio,
                 replace=config.replace,
+                tie_break=config.tie_break,
+                random_state=config.random_state,
             )
         else:
             # Covariate distances scale via a spatial tree (covariate_nn), which
@@ -479,6 +497,7 @@ def _perform_matching(
                 order_scores=propensity_scores[treatment_mask]
                 if propensity_scores is not None
                 else None,
+                tie_break=config.tie_break,
             )
 
         distance_matrix_for_results = primary_distances

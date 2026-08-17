@@ -173,8 +173,25 @@ propensity match runs in about 2 seconds and 0.4 GB (BENCHMARKS.md). MatchIt's
 C++ nearest-neighbor also handles this scale; the claim is MatchIt-identical
 results in Python at about a third of the memory.
 
-`random_state` seeds cross-fitting and `m_order="random"` only. It does not
-change the matching order; a seed that changes results would be a trap.
+`random_state` seeds cross-fitting, `m_order="random"`, and
+`tie_break="random"`. It does not change the matching order on its own; a seed
+that silently changes results would be a trap.
+
+Tie-breaking is therefore an explicit choice rather than a seed side effect.
+Every selection path resolves the argmin by input row order under the default
+`tie_break="first"`, which is deterministic and right for continuous
+distances, where exact ties are measure-zero. It is wrong the moment the key
+is coarse — categorical covariates, exact matching, a propensity model over a
+few binary predictors — because then row order alone decides the matched set,
+and row order carries site, batch, or enrollment date often enough to bias the
+estimate. `tie_break="random"` draws uniformly among the tied candidates under
+the seed, so sensitivity to tie-breaking becomes measurable by varying it, and
+a `TieBreakWarning` fires when the pool has enough duplicate keys to make the
+choice consequential. The mechanism differs by path but the semantics do not:
+the dense and windowed paths draw among the tied minima, the covariate tree
+inserts stratum points in random order (a tie group can exceed any single
+k-neighbor batch), and the optimal solver permutes control columns so that
+degenerate optima are not settled by column order.
 
 ## Validation layers
 

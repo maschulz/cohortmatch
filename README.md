@@ -486,10 +486,34 @@ the caliper, drop exact constraints, or check that the groups overlap.
 | `m_order` | hardest-first | nearest | matching order (`"largest"`, `"smallest"`, `"closest"`, `"random"`, `"data"`) |
 | `covariate_weights` | `None` | euclidean | distance weights |
 | `standardize` | `True` | covariate distances | standardize before distance computation |
-| `random_state` | `None` | all | seed for tie-breaking, `m_order="random"`, cross-fitting |
+| `tie_break` | `"first"` | nearest, optimal | equidistant candidates: `"first"` (input row order) or `"random"` |
+| `random_state` | `None` | all | seed for `tie_break="random"`, `m_order="random"`, cross-fitting |
 | `memory_limit_gb` | `4.0` | `engine="auto"` | dense-matrix budget |
 
 `subclassify()` and `cem()` have their own, smaller signatures, see their
 docstrings. Warnings are typed (`IncompleteMatchWarning`,
-`CommonSupportWarning`, `ApproximateMatchWarning`), so they can be filtered
-individually.
+`CommonSupportWarning`, `ApproximateMatchWarning`, `TieBreakWarning`), so they
+can be filtered individually.
+
+### Ties
+
+With continuous distances, two controls are almost never exactly equidistant
+from an anchor, and matching is deterministic. Coarse keys change that:
+categorical or binned covariates, exact matching, or a propensity model over a
+few binary predictors leave many candidates at the same distance. The default
+`tie_break="first"` awards those to the earlier input row, which is
+reproducible but makes the matched set a function of storage order — and
+anything that correlates with it, such as site, batch, or enrollment date,
+then leaks into the comparison group. `match()` warns (`TieBreakWarning`) when
+the pool carries enough duplicate keys for this to matter.
+
+```python
+result = match(data, treatment="treated", covariates=["sex", "smoker"],
+               tie_break="random", random_state=42)
+```
+
+`tie_break="random"` draws uniformly among the tied candidates under
+`random_state`; re-running across seeds shows how much the estimate depends on
+tie-breaking. It applies to every selection path (dense and approximate
+nearest-neighbor, the covariate-space tree, and the degenerate optima of
+`method="optimal"`). Where no ties exist it changes nothing.

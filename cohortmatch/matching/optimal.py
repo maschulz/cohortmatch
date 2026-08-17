@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
 
-from cohortmatch.matching._utils import _apply_exact_matching
+from cohortmatch.matching._utils import _apply_exact_matching, resolve_tie_break
 from cohortmatch.utils.logging import get_logger
 
 # Create a logger for this module
@@ -22,6 +22,8 @@ def optimal_match(
     exact_match_cols: list[str] | None = None,
     ratio: float = 1.0,
     replace: bool = False,
+    tie_break: str = "first",
+    random_state: int | None = None,
 ) -> tuple[dict[int, list[int]], list[float]]:
     """Implement optimal matching algorithm using the Hungarian algorithm.
     The algorithm takes a distance matrix between treatment and control units and
@@ -44,6 +46,12 @@ def optimal_match(
         exact_match_cols: Columns to match exactly on
         ratio: Matching ratio (e.g., 2 means 1:2 matching)
         replace: Whether to allow replacement in matching
+        tie_break: How equally good assignments are resolved. The total
+            distance is unique but the assignment achieving it need not be;
+            the solver settles those degenerate optima by column order, which
+            is input row order. "random" shuffles the control columns first,
+            so the choice among equally optimal solutions is uniform.
+        random_state: Seed for tie_break="random"
     Returns:
         Tuple of (match_pairs, match_distances)
     """
@@ -59,6 +67,16 @@ def optimal_match(
         distances = _apply_exact_matching(
             data, treat_indices, control_indices, distances, exact_match_cols
         )
+
+    # Degenerate optima are settled by column order; permuting the columns
+    # makes that choice random instead of a function of the input row order.
+    # Everything below works in permuted column space; only the control index
+    # recorded for a match is mapped back.
+    tie_break = resolve_tie_break(tie_break)
+    col_map = np.arange(n_control)
+    if tie_break == "random":
+        col_map = np.random.RandomState(random_state).permutation(n_control)
+        distances = distances[:, col_map]
 
     # Initialize match storage
     match_pairs: dict[int, list[int]] = {i: [] for i in range(n_treat)}
@@ -95,9 +113,9 @@ def optimal_match(
         for r, c in zip(row_ind, col_ind, strict=False):
             if np.isinf(distances[r, c % n_control]):
                 continue
-            original_c_idx = c % n_control
-            match_pairs[r].append(original_c_idx)
-            match_distances.append(distances[r, original_c_idx])
+            solver_c_idx = c % n_control
+            match_pairs[r].append(int(col_map[solver_c_idx]))
+            match_distances.append(distances[r, solver_c_idx])
 
     else:
         # --- WITHOUT REPLACEMENT: Use iterative solving ---
@@ -119,7 +137,7 @@ def optimal_match(
                 if np.isinf(distances[r, c]) or used_controls[c]:
                     continue
 
-                match_pairs[r].append(c)
+                match_pairs[r].append(int(col_map[c]))
                 match_distances.append(distances[r, c])
                 used_controls[c] = True
                 new_matches_found += 1

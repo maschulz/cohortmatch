@@ -19,7 +19,9 @@ from cohortmatch.exceptions import (
     CommonSupportWarning,
     IncompleteMatchWarning,
     NoMatchesError,
+    TieBreakWarning,
 )
+from cohortmatch.matching._utils import TIE_BREAKS
 from cohortmatch.metrics.treatment import estimate_multiple_outcomes
 from cohortmatch.pipeline import run_match
 
@@ -57,6 +59,7 @@ def match(
     discard: str | None = None,
     covariate_weights: dict[str, float] | None = None,
     standardize: bool = True,
+    tie_break: str = "first",
     random_state: int | None = None,
     memory_limit_gb: float = 4.0,
 ) -> MatchResult:
@@ -132,9 +135,21 @@ def match(
             Only valid with distance="euclidean".
         standardize: Standardize covariates before computing covariate-space
             distances.
-        random_state: Seed for tie-breaking, m_order="random", and
-            propensity cross-fitting. Never changes the matching order by
-            itself.
+        tie_break: How candidates at exactly the same distance are resolved.
+            "first" (default) takes the earlier input row, which is
+            reproducible but lets row order decide the matched set wherever
+            ties are common (categorical or coarsened covariates, a
+            propensity model over a few binary predictors). "random" draws
+            uniformly among the tied candidates using `random_state`;
+            re-running with different seeds then shows how much the result
+            rests on tie-breaking. A warning fires when the pool carries
+            enough duplicate keys for this to matter.
+        random_state: Seed for tie_break="random", m_order="random", and
+            propensity cross-fitting. It does not reorder matching by
+            itself, and with tie_break="first" and supplied propensity
+            scores it cannot change which controls are selected; when
+            scores are cross-fitted the seed changes the scores, hence the
+            matches.
         memory_limit_gb: Budget (GB) for the dense distance matrix under
             engine="auto". The dense path's peak is ~2x this during
             matching (a working copy), so set it near a third of available
@@ -274,6 +289,19 @@ def match(
         if method != "nearest":
             raise ValueError("m_order only applies to method='nearest'")
 
+    if tie_break not in TIE_BREAKS:
+        raise ValueError(
+            f"tie_break must be one of {list(TIE_BREAKS)}, got {tie_break!r}"
+        )
+    if tie_break == "random" and random_state is None:
+        warnings.warn(
+            "tie_break='random' without a random_state gives a different "
+            "matched set on every run. Pass random_state for a reproducible "
+            "draw, and vary it to check tie sensitivity.",
+            TieBreakWarning,
+            stacklevel=2,
+        )
+
     if method == "optimal" and replace:
         raise ValueError(
             "replace=True is not supported with method='optimal'; the optimal "
@@ -366,6 +394,7 @@ def match(
         replace=replace,
         ratio=float(ratio),
         random_state=random_state,
+        tie_break=tie_break,
         weights=covariate_weights,
         m_order=m_order,
         covariate_calipers=covariate_calipers,
@@ -406,6 +435,7 @@ def match(
         "m_order": m_order,
         "discard": discard,
         "standardize": standardize,
+        "tie_break": tie_break,
         "cv": cv,
         "random_state": random_state,
     }

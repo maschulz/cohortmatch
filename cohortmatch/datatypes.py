@@ -39,6 +39,9 @@ class MatcherConfig:
     replace: bool = False  # Whether to allow replacement. Applies to 'greedy', 'optimal', and 'fast_greedy' methods.
     ratio: float = 1.0
     random_state: int | None = None
+    tie_break: str = (
+        "first"  # equidistant candidates: "first" (input row order) or "random"
+    )
     weights: dict[str, float] | None = None
     matching_direction: str = "treatment"  # anchor group: "treatment" or "control"
     m_order: str | None = (

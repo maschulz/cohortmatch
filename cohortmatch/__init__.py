@@ -20,6 +20,7 @@ from cohortmatch.exceptions import (
     IncompleteMatchWarning,
     MatchingError,
     NoMatchesError,
+    TieBreakWarning,
 )
 from cohortmatch.risk_set import RiskSetResult, RiskSetSummary, match_risk_set
 from cohortmatch.utils.logging import configure_logging
@@ -34,6 +35,7 @@ __all__ = [
     "NoMatchesError",
     "RiskSetResult",
     "RiskSetSummary",
+    "TieBreakWarning",
     "cem",
     "configure_logging",
     "datasets",

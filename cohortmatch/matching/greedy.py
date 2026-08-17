@@ -1,12 +1,17 @@
 """Greedy matching algorithm implementation using numpy's efficient operations."""
 
 import logging
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
-from cohortmatch.matching._utils import _apply_exact_matching
+from cohortmatch.matching._utils import (
+    _apply_exact_matching,
+    argmin_with_tie_break,
+    resolve_tie_break,
+)
 from cohortmatch.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -16,7 +21,7 @@ def _matching_order(
     distances: np.ndarray,
     m_order: str | None,
     order_scores: np.ndarray | None,
-    rng,
+    rng: Any,
     random_state: int | None,
 ) -> np.ndarray:
     """Order in which treated units pick their matches."""
@@ -48,6 +53,7 @@ def greedy_match(
     random_state: int | None = None,
     m_order: str | None = None,
     order_scores: np.ndarray | None = None,
+    tie_break: str = "first",
 ) -> tuple[dict[int, list[int]], list[float]]:
     """Implement greedy matching algorithm.
 
@@ -64,16 +70,20 @@ def greedy_match(
         exact_match_cols: Columns to match exactly on
         replace: Whether to allow replacement in matching
         ratio: Matching ratio (e.g., 2 means 1:2 matching)
-        random_state: Seed for m_order="random"
+        random_state: Seed for m_order="random" and tie_break="random"
         m_order: Matching order: None (fewest potential matches first),
             "closest" (best available distance first), "largest"/"smallest"
             (by order_scores, e.g. the propensity score), "random", or "data"
         order_scores: Per-treated-unit scores for "largest"/"smallest"
+        tie_break: How equidistant candidates are resolved: "first" (input
+            row order) or "random" (uniform among the tied, seeded)
 
     Returns:
         Tuple of (match_pairs, match_distances)
 
     """
+    tie_break = resolve_tie_break(tie_break)
+
     logger.debug(f"GREEDY MATCHING: Ratio = {ratio}")
 
     logger.info("Starting greedy matching")
@@ -157,7 +167,7 @@ def greedy_match(
                 )
                 break
 
-            c_pos = np.argmin(t_distances)
+            c_pos = argmin_with_tie_break(t_distances, tie_break, rng)
             match_dist = t_distances[c_pos]
 
             # Store match

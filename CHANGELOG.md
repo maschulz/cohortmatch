@@ -11,12 +11,28 @@ internals carry over; the public API is new.
     longer silently truncated: propensity/logit calipers now define the
     candidate window exactly. Covariate-space calipers still use the
     prefilter window and warn about the approximation.
+-   `random_state` was documented as the seed for tie-breaking in `match()`,
+    which it never was — ties went to the earlier input row and the seed was
+    not consulted. `tie_break` now provides that behavior, and the docs
+    describe what the seed actually reaches: `m_order="random"`,
+    `tie_break="random"`, and propensity cross-fitting (which moves the
+    scores, and so the matched set, whenever scores are estimated).
 -   The dense and approximate paths clip propensity scores identically
     before logit transforms (1e-6; the dense path previously clipped at
     0.001), so caliper decisions at the tails agree between algorithms.
 
 ### Added
 
+-   `tie_break` on `match()`: how candidates at exactly the same distance are
+    resolved. The default `"first"` keeps the previous behavior (the earlier
+    input row wins), `"random"` draws among the tied candidates under
+    `random_state` and applies to every selection path — dense and windowed
+    nearest-neighbor, the covariate-space tree, and the degenerate optima of
+    `method="optimal"`. A new `TieBreakWarning` fires when the pool carries
+    enough duplicate matching keys for row order to decide the matched set,
+    which is where coarse keys (categorical covariates, exact matching, a
+    propensity model over a few binary predictors) could bias an estimate
+    silently.
 -   `m_order` on `match()`: the order in which anchor units pick matches
     ("largest"/"smallest" by propensity, "closest", "random", "data").
 -   Scale: the approximate path finds candidate pools by binary search over

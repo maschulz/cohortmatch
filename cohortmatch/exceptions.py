@@ -23,3 +23,7 @@ class CommonSupportWarning(UserWarning):
 
 class ApproximateMatchWarning(UserWarning):
     """The memory-efficient approximate algorithm was selected automatically."""
+
+
+class TieBreakWarning(UserWarning):
+    """Exact distance ties are common and are being broken by input row order."""

@@ -18,6 +18,7 @@ from sklearn.neighbors import KDTree
 from sklearn.preprocessing import StandardScaler
 
 from cohortmatch.datatypes import MatcherConfig
+from cohortmatch.matching._utils import resolve_tie_break, shuffle_tied_neighbors
 from cohortmatch.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -74,6 +75,8 @@ def covariate_nn_match(
     n_treat = len(treat_indices)
     n_control = len(control_indices)
     matches_per_unit = max(1, int(config.ratio))
+    tie_break = resolve_tie_break(getattr(config, "tie_break", "first"))
+    rng = np.random.RandomState(config.random_state)
 
     Xw = _whiten(config, data[config.covariates].to_numpy())
     Xw_treat = Xw[treat_mask]
@@ -96,11 +99,18 @@ def covariate_nn_match(
     cc_treat = {c: data[c].to_numpy(dtype=float)[treat_mask] for c in cov_calipers}
     cc_control = {c: data[c].to_numpy(dtype=float)[~treat_mask] for c in cov_calipers}
 
-    # build a tree over the control points of each stratum
+    # build a tree over the control points of each stratum. Equidistant
+    # neighbours come back in tree order, which follows the order the points
+    # were inserted; inserting them in random order is what makes the pick
+    # among tied candidates random rather than a function of the input rows.
+    # A tie group can be far larger than any single k-neighbour batch, so
+    # shuffling only the returned batch would not be enough.
     trees: dict[int, tuple[KDTree, np.ndarray]] = {}
     for s in np.unique(strata_control):
         pos = np.where(strata_control == s)[0]
         if len(pos):
+            if tie_break == "random":
+                pos = pos[rng.permutation(len(pos))]
             trees[s] = (KDTree(Xw_control[pos]), pos)
 
     # matching order (covariate path supports data / random)
@@ -108,7 +118,7 @@ def covariate_nn_match(
     if m_order in (None, "data"):
         order = np.arange(n_treat)
     elif m_order == "random":
-        order = np.random.RandomState(config.random_state).permutation(n_treat)
+        order = rng.permutation(n_treat)
     else:
         raise ValueError(
             f"m_order={m_order!r} is not supported for covariate-distance "
@@ -136,6 +146,8 @@ def covariate_nn_match(
         while found < matches_per_unit:
             dist, idx = tree.query(q, k=k)
             dist, idx = dist[0], idx[0]
+            if tie_break == "random":
+                idx = shuffle_tied_neighbors(dist, idx, rng)
             progressed = False
             for d, local in zip(dist, idx, strict=False):
                 local = int(local)

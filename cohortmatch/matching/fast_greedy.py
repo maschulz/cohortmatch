@@ -18,6 +18,7 @@ from tqdm.auto import tqdm
 
 from cohortmatch.datatypes import MatcherConfig
 from cohortmatch.exceptions import ApproximateMatchWarning
+from cohortmatch.matching._utils import argmin_with_tie_break, resolve_tie_break
 from cohortmatch.matching.distances import calculate_distance_matrix
 from cohortmatch.utils.logging import get_logger
 
@@ -44,6 +45,9 @@ def fast_greedy_match(
     logger.info("Starting fast greedy matching (memory-efficient)")
     if propensity_scores is None:
         raise ValueError("Propensity scores are required for fast_greedy_match.")
+
+    tie_break = resolve_tie_break(getattr(config, "tie_break", "first"))
+    rng = np.random.RandomState(config.random_state)
 
     treat_indices = np.where(treat_mask)[0]
     n_treat = len(treat_indices)
@@ -166,7 +170,6 @@ def fast_greedy_match(
     if m_order == "data":
         treat_order = np.arange(n_treat)
     elif m_order == "random":
-        rng = np.random.RandomState(config.random_state)
         treat_order = rng.permutation(n_treat)
     elif m_order in ("largest", "smallest"):
         order = np.argsort(treat_raw, kind="stable")
@@ -265,7 +268,7 @@ def fast_greedy_match(
         # 5. Greedy selection within the window
         matches_found = 0
         while matches_found < matches_per_unit:
-            j = int(np.argmin(dist))
+            j = argmin_with_tie_break(dist, tie_break, rng)
             d = dist[j]
             if np.isinf(d):
                 break
