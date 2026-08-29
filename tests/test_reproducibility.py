@@ -60,3 +60,17 @@ def test_few_clusters_warns():
     result = match(df, treatment="t", covariates=["x"], distance="euclidean")
     with pytest.warns(UserWarning, match="few"):
         result.estimate_effects("x")
+
+
+def test_supplement_labels_in_sample_auc(tmp_path):
+    """The default full-sample c-statistic is labeled in-sample, not
+    cross-validated, and no mean/std AUC (which would imply CV) is exposed.
+    """
+    lal = load_lalonde()
+    r = match(lal, treatment="treat", covariates=COVS, caliper="auto")
+    metrics = r.propensity_metrics or {}
+    assert "mean_auc" not in metrics and "std_auc" not in metrics
+    out = tmp_path / "supp.md"
+    r.supplement(str(out))
+    text = out.read_text()
+    assert "c-statistic (in-sample)" in text

@@ -250,8 +250,12 @@ def build_supplement(result, title: str | None = None) -> str:
     )
     metrics = result.propensity_metrics or {}
     if metrics.get("auc") is not None:
+        # AUC is cross-validated only when cross-fitting was used (fold AUCs
+        # present); the full-sample default reports an in-sample c-statistic,
+        # which is optimistic for flexible models.
+        kind = "cross-validated" if metrics.get("fold_aucs") else "in-sample"
         lines.append(
-            f"\nPropensity model c-statistic (cross-validated): "
+            f"\nPropensity model c-statistic ({kind}): "
             f"{metrics['auc']:.3f}. See `plot_propensity()` for the overlap of "
             "score distributions."
         )

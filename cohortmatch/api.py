@@ -79,10 +79,11 @@ def match(
             "atc" matches treated units to controls. For estimand="ate" use
             the stratum designs `subclassify()` or `cem()`.
         caliper: Maximum allowed distance between matched units. None (default)
-            imposes no caliper. "auto" applies the standard propensity caliper
-            of 0.2 standard deviations of the logit propensity score
-            (Austin, 2011). A float sets the threshold explicitly, interpreted
-            according to `caliper_metric` and `std_caliper`.
+            imposes no caliper. "auto" applies 0.2 times the SD of the logit
+            propensity score over the full sample -- MatchIt's std.caliper
+            convention on the logit scale, which differs from Austin (2011)'s
+            pooled within-group SD. A float sets the threshold explicitly,
+            interpreted according to `caliper_metric` and `std_caliper`.
         caliper_metric: Metric the caliper applies to: "propensity", "logit",
             "mahalanobis", or "euclidean". Defaults to "propensity". May differ
             from `distance` (e.g. Mahalanobis matching within a propensity

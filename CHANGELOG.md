@@ -69,9 +69,10 @@ internals carry over; the public API is new.
     scaling fit inside each fold. `propensity_model` accepts any sklearn
     classifier (cloned); `propensity_scores` accepts a column name, Series, or
     array.
--   `method="optimal"` returns the minimum-total-distance matching, including
-    true 1:k ratio matching, via sparse min-cost bipartite assignment; exact
-    and caliper constraints are honored as absent edges.
+-   `method="optimal"` matches via sparse min-cost bipartite assignment; for
+    1:k it fills every focal unit's first match before any second, then
+    minimizes total distance, with exact and caliper constraints honored as
+    absent edges.
 -   `covariate_weights` are validated as non-negative and finite.
 -   `engine="auto"` selects between the dense distance matrix and a
     memory-efficient prefiltered path based on `memory_limit_gb`, so large

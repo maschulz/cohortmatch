@@ -61,6 +61,19 @@ def test_optimal_finds_offdiagonal_exact_match_with_zero_distances():
     assert matched == 2  # t0(A)->c1(A), t1(B)->c0(B)
 
 
+def test_optimal_ratio_covers_every_focal_before_seconds():
+    """1:k optimal matching gives each focal a match before any focal gets a
+    second, so scarce controls cannot drop focal units (preserving the ATT).
+    """
+    data = pd.DataFrame({"treatment": [1, 1, 0, 0]})
+    treat_mask = data["treatment"] == 1
+    # t0 is near both controls, t1 is far: minimizing total distance alone would
+    # give both controls to t0 and drop t1.
+    dist = np.array([[0.0, 0.1], [100.0, 99.9]])
+    pairs, _ = optimal_match(data, dist, treat_mask, ratio=2.0)
+    assert len(pairs[0]) >= 1 and len(pairs[1]) >= 1
+
+
 def _global_kopt_total(dist: np.ndarray, k: int) -> float:
     """Reference minimum-cost 1:k without replacement (duplicate each treated k times)."""
     dk = np.repeat(dist, k, axis=0)

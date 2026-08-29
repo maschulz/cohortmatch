@@ -133,7 +133,9 @@ def estimate_propensity_scores(
             auc = float(roc_auc_score(y, propensity_scores))
         except ValueError:
             auc = float("nan")
-        cv_results = {"fold_aucs": [], "mean_auc": auc, "std_auc": 0.0}
+        # In-sample AUC only; no fold AUCs and no mean/std, which would imply
+        # cross-validation. The supplement labels this c-statistic in-sample.
+        cv_results = {"fold_aucs": []}
     else:
         # Cross-fitting: each unit scored out-of-fold to avoid overfit leakage.
         logger.info(

@@ -101,10 +101,15 @@ def optimal_match(
     # explicit 0 as "no edge", and a uniform shift never changes which
     # assignment is optimal.
     eps = 1.0
-    # A dummy edge must cost more than any all-real assignment, so the solver
-    # prefers real matches and only falls back to a dummy when a slot cannot be
-    # matched at all.
-    dummy_cost = n_rows * (max_finite + eps) + 1.0
+    # Dummy "no-match" cost, tiered by slot so a focal's first match is filled
+    # before any focal's second, and so on: leaving slot j unmatched costs
+    # strictly more than every later slot of every focal plus all real
+    # distances combined. `base` dominates any all-real assignment; the tier
+    # factor dominates the focal count. Real matches fill the highest-cost
+    # (earliest) slots first, so 1:k matching never sacrifices focal coverage
+    # (and the ATT population) to lower the total distance.
+    base = n_rows * (max_finite + eps) + 1.0
+    tier_factor = n_treat + 1
 
     rows: list[int] = []
     cols: list[int] = []
@@ -119,7 +124,7 @@ def optimal_match(
                 vals.append(float(distances[t, c]) + eps)
             rows.append(r)
             cols.append(n_control + r)  # this slot's dedicated dummy column
-            vals.append(dummy_cost)
+            vals.append(base * tier_factor ** (k - 1 - slot))
 
     graph = csr_matrix((vals, (rows, cols)), shape=(n_rows, n_control + n_rows))
     row_ind, col_ind = min_weight_full_bipartite_matching(graph)
