@@ -37,7 +37,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=3.0.0",
     "black>=23.0.0",
-    "ruff>=0.0.265",
+    "ruff==0.15.22",
     "mypy>=1.0.0",
 ]
 viz = [
