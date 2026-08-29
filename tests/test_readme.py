@@ -20,7 +20,7 @@ README = ROOT / "README.md"
 
 def _quick_start_blocks() -> list[str]:
     text = README.read_text()
-    section = re.search(r"## Quick start\n(.*?)\n## ", text, re.S)
+    section = re.search(r"#{2,3} Quick start\n(.*?)\n#{2,3} ", text, re.S)
     assert section, "README Quick start section not found"
     blocks = re.findall(r"```python\n(.*?)```", section.group(1), re.S)
     assert blocks, "no python blocks in Quick start"

@@ -21,7 +21,18 @@ models, sensitivity analysis, doubly-robust estimators) is a documented
 handoff to statsmodels/lifelines with the matching weights and groups
 attached (see "Effects on the matched sample").
 
-## Installation
+## Contents
+
+- [Getting started](#getting-started): installation, quick start, which function
+- [What matching estimates](#what-matching-estimates): assumptions, the estimand
+- [Checking and analyzing the match](#checking-and-analyzing-the-match): balance, weights, effects, handoff
+- [Tuning the match](#tuning-the-match): calipers, propensity scores, common support, constraints
+- [Other designs and scale](#other-designs-and-scale): subclassification, CEM, risk-set, large data
+- [Reference](#reference): supplement, validation, parameters, errors, citing
+
+## Getting started
+
+### Installation
 
 ```bash
 pip install "cohortmatch[viz] @ git+https://github.com/maschulz/cohortmatch.git"
@@ -29,7 +40,7 @@ pip install "cohortmatch[viz] @ git+https://github.com/maschulz/cohortmatch.git"
 
 Not yet on PyPI. The `viz` extra adds plotting.
 
-## Quick start
+### Quick start
 
 Runnable as-is; `load_lalonde()` ships with the package. Match, then check the
 balance:
@@ -58,7 +69,7 @@ result.estimate_effects("re78")   # weighted effect, cluster-robust SE
 result.supplement("supp.md")      # methods and results record for a paper
 ```
 
-## Which function do I use?
+### Which function do I use?
 
 | Design | Function | Estimand | Result shape |
 |---|---|---|---|
@@ -98,7 +109,9 @@ names are strings; covariates must be complete (no NaN).
 > matched set; multiple imputation with matching inside each imputation is
 > the rigorous route.
 
-## What matching assumes
+## What matching estimates
+
+### What matching assumes
 
 Matching adjusts only for what you match on. The causal reading of any
 effect below requires: (1) no unmeasured confounding, every variable that
@@ -110,7 +123,7 @@ comparable, never evidence for (1) or (2). For sensitivity to unmeasured
 confounding, export `result.pairs` to R's `rbounds`/`sensemakr` (Rosenbaum
 bounds are planned).
 
-## The estimand is set by the matching
+### The estimand is set by the matching
 
 `estimand="att"` (default) anchors matching on the treated units: every treated
 unit is kept if possible, and the result estimates the effect on the treated.
@@ -121,152 +134,9 @@ because dropping anchor units changes the population your estimate refers to.
 There is no silent fallback: with more treated than controls, `estimand="att"`
 still matches from the treated side and warns about the shortfall.
 
-## Calipers
+## Checking and analyzing the match
 
-A **caliper** is the largest distance two units may be apart and still be
-matched; a pair farther apart is left unmatched. No caliper is applied unless
-you ask for one, and on lopsided pools that default can be a bias trap: on the
-classic Lalonde data, 1:1 matching
-without a caliper retains all 185 treated but leaves a maximum |SMD| of
-1.03 and halves the effect estimate, silently. Check `summary()` before
-believing any effect; `caliper="auto"` is the standard remedy.
-
-```python
-# the standard choice: 0.2 SD of the logit propensity score (Austin 2011)
-match(data, treatment="treated", covariates=covs, caliper="auto")
-
-# same rule, different width
-match(data, treatment="treated", covariates=covs, caliper=0.1)
-
-# raw units instead of standardized (here: max difference in probability)
-match(data, treatment="treated", covariates=covs, caliper=0.05, std_caliper=False)
-
-# Mahalanobis matching within a propensity caliper (Rubin & Thomas)
-match(data, treatment="treated", covariates=covs,
-      distance="mahalanobis", caliper="auto")
-
-# caliper on the matching distance itself
-match(data, treatment="treated", covariates=covs,
-      distance="mahalanobis", caliper=4.0, caliper_metric="mahalanobis")
-
-# per-variable calipers, raw units: age within 3 years, BMI within 2
-match(data, treatment="treated", covariates=covs,
-      caliper="auto", covariate_calipers={"age": 3.0, "bmi": 2.0})
-```
-
-Numeric propensity calipers are standardized (multiples of the SD of the logit
-propensity score) unless `std_caliper=False`; Mahalanobis and Euclidean
-calipers are always in raw distance units.
-
-## Propensity scores
-
-When scores are needed and none are supplied, cohortmatch fits logistic
-regression with 5-fold cross-fitting, so each unit's score comes from a model
-that did not see it. No calibration is applied.
-
-```python
-# any sklearn classifier; it is cloned, your object is not touched
-from sklearn.ensemble import GradientBoostingClassifier
-match(data, treatment="treated", covariates=covs,
-      propensity_model=GradientBoostingClassifier())
-
-# precomputed scores: a column name, Series, or array
-match(data, treatment="treated", covariates=covs, propensity_scores="ps")
-```
-
-`result.propensity_scores` returns the scores as a Series aligned to your
-data's index; `result.propensity_model` a fitted pipeline usable on raw
-covariates; `result.propensity_metrics` the cross-validated AUC and overlap
-diagnostics.
-
-## Large datasets
-
-`match()` refuses to walk into an out-of-memory crash. With `engine="auto"`
-(default) it computes the dense distance matrix when it fits into
-`memory_limit_gb` (default 4 GB); beyond that it switches to a memory-bounded
-algorithm that draws candidates from a propensity-score window, announced
-with a warning. **The memory-bounded path needs a propensity caliper** to
-define its windows: at biobank scale, plans built only on `exact` and
-`covariate_calipers` will raise with the exact argument to add
-(`caliper="auto"`).
-
-```python
-# 20k cases against 480k controls: ~2 seconds, <0.5 GB
-result = match(biobank, treatment="case", covariates=covs, caliper="auto")
-
-# pin it explicitly (reproducible across data sizes, silences the warning)
-result = match(biobank, treatment="case", covariates=covs,
-               caliper="auto", engine="approximate")
-```
-
-Candidate pools come from binary search over propensity-sorted controls, and
-anchor units match hardest-first. On a 20k x 480k cohort with shared
-propensity scores, cohortmatch and R's MatchIt produce identical matched
-counts, balance, and effect estimates, at a third of the memory (see
-`BENCHMARKS.md`).
-
-Covariate distances scale too: Mahalanobis and Euclidean matching use a
-whitened KD-tree (no propensity score, no caliper required) and return the
-*same* pairs as the exact path. A 20k x 480k Mahalanobis match runs in
-~1 s in ~0.4 GB, where R's MatchIt takes ~70 s.
-
-`method="optimal"` has no approximate variant; at that scale use
-`method="nearest"`.
-
-## Common support
-
-```python
-result = match(data, treatment="treated", covariates=covs, discard="treated")
-result.discarded                 # ids dropped before matching, with a warning
-```
-
-Drops units whose propensity score falls outside the other group's range
-before matching ("treated", "control", or "both"). `result.original_data`
-and the pre-matching balance always describe the full input sample.
-
-## Stratum designs: subclassify() and cem()
-
-Stratum designs are their own entry points: they express the design through
-weights instead of pairs, accept different arguments than pair matching, and
-support `estimand="ate"`:
-
-```python
-from cohortmatch import subclassify, cem
-
-# propensity-score subclassification
-result = subclassify(data, treatment="treated", covariates=covs,
-                     n_subclasses=6, estimand="ate")
-
-# coarsened exact matching: bin, cross, keep cells with both groups
-result = cem(data, treatment="treated", covariates=covs,
-             coarsening={"age": 5}, exact="sex")
-
-result.strata                    # stratum per unit
-result.weights                   # stratum weights: each group reweighted to
-                                 # the target population's stratum distribution
-```
-
-Balance, `table1()`, and `estimate_effects()` use the weights automatically,
-with HC-robust rather than cluster-robust errors (a handful of strata are too
-few clusters). Subclassification is validated against MatchIt; CEM's default
-binning is Sturges' rule per continuous covariate. Note CEM is a different
-design, not a drop-in sensitivity swap for pair matching: there is no ratio
-or caliper; closeness is expressed through the coarsening.
-
-## Other constraints
-
-```python
-match(data, treatment="treated", covariates=covs,
-      method="optimal",          # global optimum instead of nearest-neighbor
-      distance="mahalanobis",
-      ratio=2,                   # 1:2 matching (two controls per anchor)
-      exact="sex",               # or a list of columns
-      random_state=42)
-```
-
-`replace=True` allows controls to be reused across matches (`"nearest"` only).
-
-## Balance
+### Balance
 
 ```python
 result.balance()                   # signed SMDs and variance ratios, before/after
@@ -304,7 +174,7 @@ result.plot_match_distances()
 `match()` does not flag balance quality; `summary()` reports the SMDs and the
 judgment is yours.
 
-## Matching weights
+### Matching weights
 
 ```python
 result.weights                   # Series indexed by unit; anchors get 1
@@ -316,7 +186,7 @@ ratio matching are expressed through the weights, never duplicated rows. Any
 analysis of the matched sample should use them, for example
 `sm.WLS(y, X, weights=result.weights)`.
 
-## Treatment effects
+### Treatment effects
 
 ```python
 effects = result.estimate_effects(
@@ -342,7 +212,7 @@ match groups; spatially or network-correlated outcomes need external
 correction. The estimand is inherited from the matching design; there is no
 way to relabel an ATT matched sample as ATE after the fact.
 
-## Effects on the matched sample: the handoff
+### Effects on the matched sample: the handoff
 
 Anything beyond the built-in estimators is a few lines with the weights and
 match groups the result carries:
@@ -385,7 +255,122 @@ Odds and hazard ratios are converted via the standard approximations
 cohortmatch is silent by default. `cohortmatch.configure_logging()` turns on
 progress output, including progress bars for long matching runs.
 
-## Risk-set matching (nested case-control)
+## Tuning the match
+
+### Calipers
+
+A **caliper** is the largest distance two units may be apart and still be
+matched; a pair farther apart is left unmatched. No caliper is applied unless
+you ask for one, and on lopsided pools that default can be a bias trap: on the
+classic Lalonde data, 1:1 matching
+without a caliper retains all 185 treated but leaves a maximum |SMD| of
+1.03 and halves the effect estimate, silently. Check `summary()` before
+believing any effect; `caliper="auto"` is the standard remedy.
+
+```python
+# the standard choice: 0.2 SD of the logit propensity score (Austin 2011)
+match(data, treatment="treated", covariates=covs, caliper="auto")
+
+# same rule, different width
+match(data, treatment="treated", covariates=covs, caliper=0.1)
+
+# raw units instead of standardized (here: max difference in probability)
+match(data, treatment="treated", covariates=covs, caliper=0.05, std_caliper=False)
+
+# Mahalanobis matching within a propensity caliper (Rubin & Thomas)
+match(data, treatment="treated", covariates=covs,
+      distance="mahalanobis", caliper="auto")
+
+# caliper on the matching distance itself
+match(data, treatment="treated", covariates=covs,
+      distance="mahalanobis", caliper=4.0, caliper_metric="mahalanobis")
+
+# per-variable calipers, raw units: age within 3 years, BMI within 2
+match(data, treatment="treated", covariates=covs,
+      caliper="auto", covariate_calipers={"age": 3.0, "bmi": 2.0})
+```
+
+Numeric propensity calipers are standardized (multiples of the SD of the logit
+propensity score) unless `std_caliper=False`; Mahalanobis and Euclidean
+calipers are always in raw distance units.
+
+### Propensity scores
+
+When scores are needed and none are supplied, cohortmatch fits logistic
+regression with 5-fold cross-fitting, so each unit's score comes from a model
+that did not see it. No calibration is applied.
+
+```python
+# any sklearn classifier; it is cloned, your object is not touched
+from sklearn.ensemble import GradientBoostingClassifier
+match(data, treatment="treated", covariates=covs,
+      propensity_model=GradientBoostingClassifier())
+
+# precomputed scores: a column name, Series, or array
+match(data, treatment="treated", covariates=covs, propensity_scores="ps")
+```
+
+`result.propensity_scores` returns the scores as a Series aligned to your
+data's index; `result.propensity_model` a fitted pipeline usable on raw
+covariates; `result.propensity_metrics` the cross-validated AUC and overlap
+diagnostics.
+
+### Common support
+
+```python
+result = match(data, treatment="treated", covariates=covs, discard="treated")
+result.discarded                 # ids dropped before matching, with a warning
+```
+
+Drops units whose propensity score falls outside the other group's range
+before matching ("treated", "control", or "both"). `result.original_data`
+and the pre-matching balance always describe the full input sample.
+
+### Other constraints
+
+```python
+match(data, treatment="treated", covariates=covs,
+      method="optimal",          # global optimum instead of nearest-neighbor
+      distance="mahalanobis",
+      ratio=2,                   # 1:2 matching (two controls per anchor)
+      exact="sex",               # or a list of columns
+      random_state=42)
+```
+
+`replace=True` allows controls to be reused across matches (`"nearest"` only).
+
+## Other designs and scale
+
+### Stratum designs: subclassify() and cem()
+
+Stratum designs are their own entry points: they express the design through
+weights instead of pairs, accept different arguments than pair matching, and
+support `estimand="ate"`:
+
+```python
+from cohortmatch import subclassify, cem
+
+# propensity-score subclassification
+result = subclassify(data, treatment="treated", covariates=covs,
+                     n_subclasses=6, estimand="ate")
+
+# coarsened exact matching: bin, cross, keep cells with both groups
+result = cem(data, treatment="treated", covariates=covs,
+             coarsening={"age": 5}, exact="sex")
+
+result.strata                    # stratum per unit
+result.weights                   # stratum weights: each group reweighted to
+                                 # the target population's stratum distribution
+```
+
+Balance, `table1()`, and `estimate_effects()` use the weights automatically,
+with HC-robust rather than cluster-robust errors (a handful of strata are too
+few clusters). Subclassification is validated against MatchIt; CEM's default
+binning is Sturges' rule per continuous covariate. Note CEM is a different
+design, not a drop-in sensitivity swap for pair matching: there is no ratio
+or caliper; closeness is expressed through the coarsening.
+
+### Risk-set matching (nested case-control)
 
 ```python
 from cohortmatch import match_risk_set
@@ -414,7 +399,43 @@ departs from random sampling and can bias the odds ratio toward the null
 be adjusted in `estimate_odds_ratio`. Neither MatchIt nor any Python
 package offers this design.
 
-## Supplementary material
+### Large datasets
+
+`match()` refuses to walk into an out-of-memory crash. With `engine="auto"`
+(default) it computes the dense distance matrix when it fits into
+`memory_limit_gb` (default 4 GB); beyond that it switches to a memory-bounded
+algorithm that draws candidates from a propensity-score window, announced
+with a warning. **The memory-bounded path needs a propensity caliper** to
+define its windows: at biobank scale, plans built only on `exact` and
+`covariate_calipers` will raise with the exact argument to add
+(`caliper="auto"`).
+
+```python
+# 20k cases against 480k controls: ~2 seconds, <0.5 GB
+result = match(biobank, treatment="case", covariates=covs, caliper="auto")
+
+# pin it explicitly (reproducible across data sizes, silences the warning)
+result = match(biobank, treatment="case", covariates=covs,
+               caliper="auto", engine="approximate")
+```
+
+Candidate pools come from binary search over propensity-sorted controls, and
+anchor units match hardest-first. On a 20k x 480k cohort with shared
+propensity scores, cohortmatch and R's MatchIt produce identical matched
+counts, balance, and effect estimates, at a third of the memory (see
+`BENCHMARKS.md`).
+
+Covariate distances scale too: Mahalanobis and Euclidean matching use a
+whitened KD-tree (no propensity score, no caliper required) and return the
+*same* pairs as the exact path. A 20k x 480k Mahalanobis match runs in
+~1 s in ~0.4 GB, where R's MatchIt takes ~70 s.
+
+`method="optimal"` has no approximate variant; at that scale use
+`method="nearest"`.
+
+## Reference
+
+### Supplementary material
 
 ```python
 result.supplement("supplement_S1.md", title="Study S1 matching supplement")
@@ -427,15 +448,7 @@ seed, the sample flow, the balance table, effect estimates, and a citable
 methods paragraph with references. Plain text, no extra dependencies;
 convert with pandoc if the journal wants PDF or Word.
 
-## How to cite
-
-If you use cohortmatch in published work, please cite it (see
-`CITATION.cff`):
-
-> Schulz, M.-A. (2026). *cohortmatch: statistical matching for cohort
-> studies at scale.* https://github.com/maschulz/cohortmatch
-
-## Validation against MatchIt
+### Validation against MatchIt
 
 **[VALIDATION.md](VALIDATION.md)** is a generated report reconciling every
 design and effect estimator against R, row by row. **[BENCHMARKS.md](BENCHMARKS.md)**
@@ -456,12 +469,12 @@ from cohortmatch.datasets import load_lalonde
 lalonde = load_lalonde()
 ```
 
-## No matches?
+### No matches?
 
 `match()` raises `NoMatchesError` instead of returning an empty result. Relax
 the caliper, drop exact constraints, or check that the groups overlap.
 
-## match() reference
+### match() reference
 
 | Parameter | Default | Applies to | Meaning |
 |---|---|---|---|
@@ -493,3 +506,12 @@ the caliper, drop exact constraints, or check that the groups overlap.
 docstrings. Warnings are typed (`IncompleteMatchWarning`,
 `CommonSupportWarning`, `ApproximateMatchWarning`), so they can be filtered
 individually.
+
+### How to cite
+
+If you use cohortmatch in published work, please cite it (see
+`CITATION.cff`):
+
+> Schulz, M.-A. (2026). *cohortmatch: statistical matching for cohort
+> studies at scale.* https://github.com/maschulz/cohortmatch
+
