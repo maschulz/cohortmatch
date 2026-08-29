@@ -1,9 +1,10 @@
 {
   "title": "cohortmatch: statistical matching for cohort studies at scale",
+  "description": "Statistical matching for cohort studies: nearest-neighbor and optimal matching on propensity scores or covariate distances, propensity subclassification, coarsened exact matching, and risk-set matching, with calipers, exact constraints, balance diagnostics, and treatment-effect estimation. Validated against R's MatchIt; scales to biobank-sized cohorts.",
   "upload_type": "software",
   "license": "MIT",
   "version": "0.1.0",
-  "creators": [{"name": "Schulz, Marc-Andre"}],
+  "creators": [{"name": "Schulz, Marc-Andre", "orcid": "0000-0002-1140-1841"}],
   "keywords": ["propensity score matching", "causal inference",
                "nested case-control", "incidence-density sampling",
                "epidemiology", "scikit-learn"]

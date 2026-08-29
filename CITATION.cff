@@ -5,12 +5,16 @@ type: software
 authors:
   - family-names: Schulz
     given-names: Marc-Andre
+    orcid: "https://orcid.org/0000-0002-1140-1841"
 repository-code: "https://github.com/maschulz/cohortmatch"
+url: "https://github.com/maschulz/cohortmatch"
 license: MIT
 version: 0.1.0
-date-released: "2026-07-19"
+date-released: "2026-08-29"
 keywords:
   - propensity score matching
   - causal inference
   - nested case-control
+  - incidence-density sampling
   - epidemiology
+  - scikit-learn
