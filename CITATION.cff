@@ -8,6 +8,7 @@ authors:
     orcid: "https://orcid.org/0000-0002-1140-1841"
 repository-code: "https://github.com/maschulz/cohortmatch"
 url: "https://github.com/maschulz/cohortmatch"
+doi: 10.5281/zenodo.22165418
 license: MIT
 version: 0.1.0
 date-released: "2026-08-29"

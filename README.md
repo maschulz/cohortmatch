@@ -5,6 +5,7 @@
 [![Validated against MatchIt](https://img.shields.io/badge/validated%20against-MatchIt-success)](VALIDATION.md)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)](https://github.com/maschulz/cohortmatch/blob/main/pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/maschulz/cohortmatch/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22165418.svg)](https://doi.org/10.5281/zenodo.22165418)
 
 Statistical matching for cohort studies: nearest-neighbor and optimal matching
 on propensity scores or covariate distances, propensity subclassification,
@@ -35,10 +36,10 @@ attached (see "Effects on the matched sample").
 ### Installation
 
 ```bash
-pip install "cohortmatch[viz] @ git+https://github.com/maschulz/cohortmatch.git"
+pip install "cohortmatch[viz]"
 ```
 
-Not yet on PyPI. The `viz` extra adds plotting.
+The `viz` extra adds plotting.
 
 ### Quick start
 
@@ -552,5 +553,8 @@ If you use cohortmatch in published work, please cite it (see
 `CITATION.cff`):
 
 > Schulz, M.-A. (2026). *cohortmatch: statistical matching for cohort
-> studies at scale.* https://github.com/maschulz/cohortmatch
+> studies at scale.* https://doi.org/10.5281/zenodo.22165418
+
+The DOI resolves to the latest release; the sidebar "Cite this repository" on
+GitHub reads `CITATION.cff` for BibTeX and other formats.
 
