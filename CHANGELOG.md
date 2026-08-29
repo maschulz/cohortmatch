@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+-   Matching order is now stable: treated units with tied propensity scores
+    (or tied candidate counts under `m_order=None`) keep data order instead
+    of whatever numpy's quicksort produced, which varied by numpy build and
+    CPU architecture and made the matched sample platform-dependent. Under
+    `m_order="largest"` the caliper design on Lalonde now reproduces
+    MatchIt's matched sample unit for unit and its ATT to 1e-6; it
+    previously differed by a swapped pair.
+
 ### Changed
 
 -   Minimum supported dependency versions: scikit-learn 1.4, numpy 1.21.2,

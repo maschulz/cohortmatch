@@ -44,17 +44,15 @@ A caliper or an exact constraint leaves some treated units without an eligible c
 | design | metric | cohortmatch | MatchIt | agree |
 |---|---|---|---|---|
 | nearest, caliper 0.2 SD | matched treated | 113 | 113 | ✓ |
-| | treated units shared | 112 | 113 | ‡ |
+| | treated units shared | 113 | 113 | ✓ |
 | | control units shared | 113 | 113 | ✓ |
 | | mean \|SMD\| after | 0.0679 | 0.0679 | ✓ |
-| | ATT (re78) | 1649.4 | 1571.7 | ‡ |
+| | ATT (re78) | 1571.7 | 1571.7 | ✓ |
 | nearest, exact race | matched treated | 116 | 116 | ✓ |
 | | treated units shared | 116 | 116 | ✓ |
 | | control units shared | 116 | 116 | ✓ |
 | | mean \|SMD\| after | 0.2190 | 0.2190 | ✓ |
 | | ATT (re78) | 1472.7 | 1472.7 | ✓ |
-
-‡ In *nearest, caliper 0.2 SD*, cohortmatch keeps NSW74 where MatchIt keeps NSW35. Those units have identical covariates and so a tied propensity score, which the order breaks arbitrarily. Balance is untouched; the ATT moves by their `re78` difference spread over 113 pairs.
 
 ### Under cohortmatch's default order
 
@@ -62,8 +60,8 @@ cohortmatch orders treated units by how scarce their eligible controls are, Matc
 
 | design | matched treated | shared with MatchIt | mean \|SMD\| after |
 |---|---|---|---|
-| nearest, caliper 0.2 SD | 110 | 82 of 113 | 0.0953 |
-| nearest, exact race | 116 | 73 of 116 | 0.0781 |
+| nearest, caliper 0.2 SD | 111 | 83 of 113 | 0.0973 |
+| nearest, exact race | 116 | 82 of 116 | 0.1881 |
 
 ## Treatment effect vs MatchIt
 
@@ -72,7 +70,7 @@ Weighted effect on `re78` with cluster-robust SEs on match groups.
 | design | quantity | cohortmatch | MatchIt | agree |
 |---|---|---|---|---|
 | nearest 1:1 | ATT (re78) | 894.4 | 894.4 | ✓ |
-| | cluster-robust SE | 710.9 | 705.2 | ✓ |
+| | cluster-robust SE | 686.3 | 705.2 | ✓ |
 | full cohort | odds ratio (glm) | 0.921114 | 0.921114 | ✓ |
 | | robust SE | 0.2064 | 0.2067 | ✓ |
 

@@ -169,8 +169,12 @@ def fast_greedy_match(
         rng = np.random.RandomState(config.random_state)
         treat_order = rng.permutation(n_treat)
     elif m_order in ("largest", "smallest"):
-        order = np.argsort(treat_raw, kind="stable")
-        treat_order = order[::-1] if m_order == "largest" else order
+        # negate rather than reverse so tied scores keep data order, as in the
+        # exact engine
+        if m_order == "largest":
+            treat_order = np.argsort(-treat_raw, kind="stable")
+        else:
+            treat_order = np.argsort(treat_raw, kind="stable")
     else:
         raise ValueError(
             f"m_order='{m_order}' is not supported by the approximate algorithm; "

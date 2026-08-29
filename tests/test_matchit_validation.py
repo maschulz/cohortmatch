@@ -132,18 +132,14 @@ class TestNearestDesigns:
         assert effects["standard_error"].iloc[0] == pytest.approx(g["att_se"], rel=0.25)
 
     @pytest.mark.parametrize(
-        "name,kwargs,max_swaps,att_abs",
+        "name,kwargs",
         [
-            # NSW74 and NSW35 have identical covariates, so the caliper design
-            # has to break a tied propensity score between them; the swap moves
-            # the ATT by their re78 difference over 113 pairs and leaves every
-            # balance figure untouched
-            ("nearest_caliper", {}, 1, 100.0),
-            ("nearest_exact_race", {"exact": "race"}, 0, 1e-6),
+            ("nearest_caliper", {}),
+            ("nearest_exact_race", {"exact": "race"}),
         ],
     )
     def test_contested_designs_reproduce_matchit_under_its_order(
-        self, lalonde, golden, name, kwargs, max_swaps, att_abs
+        self, lalonde, golden, name, kwargs
     ):
         # when controls are contested the matching order decides which treated
         # units drop; run MatchIt's order and the matched samples coincide
@@ -158,7 +154,10 @@ class TestNearestDesigns:
         if "treated_ids" in g:
             ours_treated = {str(i) for i in matched.index[matched["treat"] == 1]}
             expected_treated = {str(i) for i in g["treated_ids"]}
-            assert len(expected_treated - ours_treated) <= max_swaps
+            # several treated units share a propensity score, so this also
+            # pins the tie-breaking: ties have to keep data order, as R's
+            # order() does
+            assert ours_treated == expected_treated
 
         balance = result.balance().set_index("variable")
         for cov, expected in g["smd_after"].items():
@@ -167,7 +166,7 @@ class TestNearestDesigns:
             )
 
         effects = result.estimate_effects("re78")
-        assert effects["effect"].iloc[0] == pytest.approx(g["att"], abs=att_abs)
+        assert effects["effect"].iloc[0] == pytest.approx(g["att"], abs=1e-6)
 
     @pytest.mark.parametrize(
         "name,kwargs",

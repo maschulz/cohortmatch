@@ -23,18 +23,22 @@ def _matching_order(
     n_treat = distances.shape[0]
     if m_order is None:
         # fewest potential matches first (helps under exact/caliper constraints)
-        return np.argsort(np.sum(~np.isinf(distances), axis=1))
+        return np.argsort(np.sum(~np.isinf(distances), axis=1), kind="stable")
     if m_order == "data":
         return np.arange(n_treat)
     if m_order == "random":
         return rng.permutation(n_treat)
     if m_order == "closest":
-        return np.argsort(np.min(distances, axis=1))
+        return np.argsort(np.min(distances, axis=1), kind="stable")
     if m_order in ("largest", "smallest"):
         if order_scores is None:
             raise ValueError(f"m_order='{m_order}' requires order scores (propensity)")
-        order = np.argsort(order_scores)
-        return order[::-1] if m_order == "largest" else order
+        # stable, and negate rather than reverse, so tied scores keep data
+        # order the way R's order() does: an unstable sort breaks the ties
+        # differently across numpy builds and CPU architectures
+        if m_order == "largest":
+            return np.argsort(-np.asarray(order_scores), kind="stable")
+        return np.argsort(order_scores, kind="stable")
     raise ValueError(f"Unknown m_order: {m_order}")
 
 
