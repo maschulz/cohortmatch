@@ -5,6 +5,7 @@ type: software
 authors:
   - family-names: Schulz
     given-names: Marc-Andre
+    email: marc.a.schulz@gmail.com
     orcid: "https://orcid.org/0000-0002-1140-1841"
 repository-code: "https://github.com/maschulz/cohortmatch"
 url: "https://github.com/maschulz/cohortmatch"
@@ -19,3 +20,9 @@ keywords:
   - incidence-density sampling
   - epidemiology
   - scikit-learn
+abstract: >-
+  Statistical matching for cohort studies: nearest-neighbor and optimal
+  matching on propensity scores or covariate distances, propensity
+  subclassification, coarsened exact matching, and risk-set matching, with
+  calipers, exact constraints, balance diagnostics, and treatment-effect
+  estimation. Validated against R's MatchIt; scales to biobank-sized cohorts.
