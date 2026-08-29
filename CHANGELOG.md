@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+-   Minimum supported dependency versions: scikit-learn 1.4, numpy 1.21.2,
+    pandas 1.3.3, scipy 1.7.2, statsmodels 0.13.1, tqdm 4.60. Below
+    scikit-learn 1.4 the Lalonde propensity scores land up to 0.39 away from
+    R's glm and the MatchIt golden tests fail. `tqdm` previously had no lower
+    bound at all.
+
 ## [0.1.0] - 2026-08-29
 
 First release of CohortMatch, the successor to cohortbalancer3. The matching
