@@ -36,8 +36,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=3.0.0",
-    "black>=23.0.0",
-    "ruff==0.15.22",
+    "ruff==0.16.5",
     "mypy>=1.0.0",
 ]
 viz = [
@@ -92,6 +91,11 @@ unfixable = []
 known-first-party = ["cohortmatch"]
 
 [tool.ruff.format]
+# ruff 0.16 formats Python inside Markdown. README examples are written to
+# be read, not to match source style: aligned comment columns and grouped
+# call arguments carry meaning the formatter flattens, and test_readme.py
+# executes the blocks, so a mangled comment would pass unnoticed.
+exclude = ["*.md"]
 quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
