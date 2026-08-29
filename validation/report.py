@@ -80,10 +80,10 @@ def main() -> None:
     w("## Matching designs vs MatchIt\n")
     w(
         "Matched counts, and mean |SMD| after matching (lower is better). "
-        "Under contested controls the matching *order* differs from MatchIt, "
-        "so pairs are not identical. For the balance rows, **✓ means "
-        "cohortmatch's achieved balance is at least as good as MatchIt's** "
-        "(within 0.05), not that the two numbers are equal.\n"
+        "Every design here keeps all 185 treated units, so both "
+        "implementations balance the same population. Under contested "
+        "controls the matching *order* differs from MatchIt, so pairs are not "
+        "always identical and ✓ on a balance row means within 0.05.\n"
     )
     w("| design | metric | cohortmatch | MatchIt | agree |")
     w("|---|---|---|---|---|")
@@ -115,11 +115,6 @@ def main() -> None:
             "nearest 1:2 (propensity)",
             _run("nearest_1to2", propensity_scores="ps", ratio=2),
             "nearest_1to2",
-        ),
-        (
-            "nearest, exact race",
-            _run("nearest_exact_race", propensity_scores="ps", exact="race"),
-            "nearest_exact_race",
         ),
         (
             "nearest, Mahalanobis",
@@ -168,6 +163,94 @@ def main() -> None:
         "adjacent cells. Balance within cells is identical; only a couple of "
         "boundary units are assigned differently.\n"
     )
+
+    # --- designs that drop treated units ------------------------------------
+    w("## Designs where treated units must drop\n")
+    w(
+        "A caliper or an exact constraint leaves some treated units without "
+        "an eligible control, and the matching *order* decides which ones go. "
+        'Run under MatchIt\'s own order (`m_order="largest"`), cohortmatch '
+        "reproduces its matched sample unit for unit.\n"
+    )
+    w("| design | metric | cohortmatch | MatchIt | agree |")
+    w("|---|---|---|---|---|")
+    contested = [
+        (
+            "nearest, caliper 0.2 SD",
+            "nearest_caliper",
+            dict(caliper=0.2 * golden["sd_ps"], std_caliper=False),
+        ),
+        ("nearest, exact race", "nearest_exact_race", dict(exact="race")),
+    ]
+    ties: list[str] = []
+    for label, key, kw in contested:
+        g = designs[key]
+        res = _run(key, propensity_scores="ps", m_order="largest", **kw)
+        md = res.matched_data
+        ours_t = {str(i) for i in md.index[md["treat"] == 1]}
+        ours_c = {str(i) for i in md.index[md["treat"] == 0]}
+        exp_t = {str(i) for i in g.get("treated_ids", [])}
+        exp_c = {str(i) for i in g["control_ids"]}
+        ours = res.balance().set_index("variable").loc[COVS, "smd_after"].abs().mean()
+        mit = np.mean([abs(x) for x in g["smd_after"].values()])
+        att = res.estimate_effects("re78").iloc[0]["effect"]
+        w(
+            f"| {label} | matched treated | {len(ours_t)} | {g['n_treated']} | "
+            f"{_agree(len(ours_t), g['n_treated'], 0)} |"
+        )
+        if exp_t:
+            swapped = sorted(exp_t - ours_t)
+            w(
+                f"| | treated units shared | {len(ours_t & exp_t)} | {len(exp_t)} | "
+                f"{'✓' if not swapped else '‡'} |"
+            )
+            if swapped:
+                kept = sorted(ours_t - exp_t)
+                ties.append(
+                    f"‡ In *{label}*, cohortmatch keeps "
+                    f"{', '.join(kept)} where MatchIt keeps "
+                    f"{', '.join(swapped)}. Those units have identical "
+                    "covariates and so a tied propensity score, which the "
+                    "order breaks arbitrarily. Balance is untouched; the ATT "
+                    "moves by their `re78` difference spread over "
+                    f"{len(ours_t)} pairs."
+                )
+        w(
+            f"| | control units shared | {len(ours_c & exp_c)} | {len(exp_c)} | "
+            f"{'✓' if ours_c == exp_c else '✗'} |"
+        )
+        w(
+            f"| | mean \\|SMD\\| after | {ours:.4f} | {mit:.4f} | "
+            f"{_agree(ours, mit, 1e-6)} |"
+        )
+        w(
+            f"| | ATT (re78) | {att:.1f} | {g['att']:.1f} | "
+            f"{'✓' if abs(att - g['att']) < 1 else '‡'} |"
+        )
+    w("")
+    for note in ties:
+        w(note + "\n")
+
+    w("### Under cohortmatch's default order\n")
+    w(
+        "cohortmatch orders treated units by how scarce their eligible "
+        "controls are, MatchIt by descending propensity score. The two then "
+        "keep different treated subsets, so the balance below is achieved on "
+        "a different matched-treated population and does not compare with "
+        "MatchIt's figures above.\n"
+    )
+    w("| design | matched treated | shared with MatchIt | mean \\|SMD\\| after |")
+    w("|---|---|---|---|")
+    for label, key, kw in contested:
+        g = designs[key]
+        res = _run(key, propensity_scores="ps", **kw)
+        md = res.matched_data
+        ours_t = {str(i) for i in md.index[md["treat"] == 1]}
+        exp_t = {str(i) for i in g.get("treated_ids", [])}
+        ours = res.balance().set_index("variable").loc[COVS, "smd_after"].abs().mean()
+        shared = f"{len(ours_t & exp_t)} of {len(exp_t)}" if exp_t else "n/a"
+        w(f"| {label} | {len(ours_t)} | {shared} | {ours:.4f} |")
+    w("")
 
     # --- ATT ----------------------------------------------------------------
     w("## Treatment effect vs MatchIt\n")

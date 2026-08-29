@@ -70,6 +70,7 @@ design_block <- function(m.out) {
     n_control = sum(md$treat == 0),
     sum_weights_control = sum(md$weights[md$treat == 0]),
     control_ids = sort(md$id[md$treat == 0]),
+    treated_ids = sort(md$id[md$treat == 1]),
     smd_after = smd_from_baltab(bal, "Diff.Adj"),
     att = unname(ct["treat", "Estimate"]),
     att_se = unname(ct["treat", "Std. Error"]),

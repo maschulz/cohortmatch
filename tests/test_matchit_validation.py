@@ -12,9 +12,11 @@ Comparison tightness varies by design:
   optmatch's tolerance-bounded solve, never worse.
 - Nearest 1:1 and 1:2 (no competition for controls): counts exact and
   post-matching SMDs within 0.05 of MatchIt's.
-- Caliper and exact designs (matching order matters under competition):
-  counts within a small margin, aggregate balance quality no worse than
-  MatchIt's by more than 0.05 mean |SMD|, ATT within half a standard error.
+- Caliper and exact designs (controls are contested, so the matching order
+  decides which treated units drop): run under MatchIt's own order they
+  reproduce its matched sample unit for unit; under cohortmatch's default
+  order a different treated subset is retained, so only the count and the
+  balance our default achieves are checked.
 
 Requires validation/golden.json (generated in CI, or locally with R +
 MatchIt + cobalt installed); tests skip when it is absent.
@@ -130,18 +132,58 @@ class TestNearestDesigns:
         assert effects["standard_error"].iloc[0] == pytest.approx(g["att_se"], rel=0.25)
 
     @pytest.mark.parametrize(
+        "name,kwargs,max_swaps,att_abs",
+        [
+            # NSW74 and NSW35 have identical covariates, so the caliper design
+            # has to break a tied propensity score between them; the swap moves
+            # the ATT by their re78 difference over 113 pairs and leaves every
+            # balance figure untouched
+            ("nearest_caliper", {}, 1, 100.0),
+            ("nearest_exact_race", {"exact": "race"}, 0, 1e-6),
+        ],
+    )
+    def test_contested_designs_reproduce_matchit_under_its_order(
+        self, lalonde, golden, name, kwargs, max_swaps, att_abs
+    ):
+        # when controls are contested the matching order decides which treated
+        # units drop; run MatchIt's order and the matched samples coincide
+        g = golden["designs"][name]
+        with pytest.warns(UserWarning):
+            result = run_design(lalonde, golden, name, m_order="largest", **kwargs)
+        matched = result.matched_data
+
+        controls = sorted(str(i) for i in matched.index[matched["treat"] == 0])
+        assert controls == sorted(str(i) for i in g["control_ids"])
+        assert (matched["treat"] == 1).sum() == g["n_treated"]
+        if "treated_ids" in g:
+            ours_treated = {str(i) for i in matched.index[matched["treat"] == 1]}
+            expected_treated = {str(i) for i in g["treated_ids"]}
+            assert len(expected_treated - ours_treated) <= max_swaps
+
+        balance = result.balance().set_index("variable")
+        for cov, expected in g["smd_after"].items():
+            assert balance.loc[cov, "smd_after"] == pytest.approx(expected, abs=1e-9), (
+                f"{name}: post-matching SMD for {cov} deviates from MatchIt"
+            )
+
+        effects = result.estimate_effects("re78")
+        assert effects["effect"].iloc[0] == pytest.approx(g["att"], abs=att_abs)
+
+    @pytest.mark.parametrize(
         "name,kwargs",
         [
             ("nearest_caliper", {}),
             ("nearest_exact_race", {"exact": "race"}),
         ],
     )
-    def test_contested_designs_reconcile_in_quality(
+    def test_default_order_matches_a_comparable_sample(
         self, lalonde, golden, name, kwargs
     ):
-        # matching order determines which units drop and which pairs form
-        # when controls are contested; compare counts and balance quality,
-        # not the specific pairs
+        # cohortmatch orders treated units by how scarce their eligible
+        # controls are, MatchIt by descending propensity score, so the two
+        # retain different treated subsets and their balance figures describe
+        # different populations. Guard the count and the balance our own
+        # default achieves; the reproduction test above owns the comparison.
         g = golden["designs"][name]
         with pytest.warns(UserWarning):
             result = run_design(lalonde, golden, name, **kwargs)
@@ -155,11 +197,6 @@ class TestNearestDesigns:
         matchit = np.mean([abs(v) for v in g["smd_after"].values()])
         assert ours <= matchit + 0.05, (
             f"{name}: mean |SMD| {ours:.3f} worse than MatchIt's {matchit:.3f} + 0.05"
-        )
-
-        effects = result.estimate_effects("re78")
-        assert effects["effect"].iloc[0] == pytest.approx(
-            g["att"], abs=max(250, 0.5 * g["att_se"])
         )
 
     def test_weights_sum_matches(self, lalonde, golden):

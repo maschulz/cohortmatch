@@ -21,7 +21,7 @@ Signed SMDs standardized by the treated-group SD, cobalt's convention.
 
 ## Matching designs vs MatchIt
 
-Matched counts, and mean |SMD| after matching (lower is better). Under contested controls the matching *order* differs from MatchIt, so pairs are not identical. For the balance rows, **✓ means cohortmatch's achieved balance is at least as good as MatchIt's** (within 0.05), not that the two numbers are equal.
+Matched counts, and mean |SMD| after matching (lower is better). Every design here keeps all 185 treated units, so both implementations balance the same population. Under contested controls the matching *order* differs from MatchIt, so pairs are not always identical and ✓ on a balance row means within 0.05.
 
 | design | metric | cohortmatch | MatchIt | agree |
 |---|---|---|---|---|
@@ -31,13 +31,39 @@ Matched counts, and mean |SMD| after matching (lower is better). Under contested
 | | mean \|SMD\| after | 0.2719 | 0.2689 | ✓ |
 | nearest 1:2 (propensity) | matched treated | 185 | 185 | ✓ |
 | | mean \|SMD\| after | 0.4704 | 0.4704 | ✓ |
-| nearest, exact race | matched treated | 116 | 116 | ✓ |
-| | mean \|SMD\| after | 0.0781 | 0.2190 | ✓ |
 | nearest, Mahalanobis | matched treated | 185 | 185 | ✓ |
 | | mean \|SMD\| after | 0.2334 | 0.2312 | ✓ |
 | coarsened exact matching † | matched treated | 180 | 178 | ✓ |
 
 † CEM counts differ by a unit or two: numpy's `digitize` and R's `cut()` place values that fall *exactly* on a bin boundary in adjacent cells. Balance within cells is identical; only a couple of boundary units are assigned differently.
+
+## Designs where treated units must drop
+
+A caliper or an exact constraint leaves some treated units without an eligible control, and the matching *order* decides which ones go. Run under MatchIt's own order (`m_order="largest"`), cohortmatch reproduces its matched sample unit for unit.
+
+| design | metric | cohortmatch | MatchIt | agree |
+|---|---|---|---|---|
+| nearest, caliper 0.2 SD | matched treated | 113 | 113 | ✓ |
+| | treated units shared | 112 | 113 | ‡ |
+| | control units shared | 113 | 113 | ✓ |
+| | mean \|SMD\| after | 0.0679 | 0.0679 | ✓ |
+| | ATT (re78) | 1649.4 | 1571.7 | ‡ |
+| nearest, exact race | matched treated | 116 | 116 | ✓ |
+| | treated units shared | 116 | 116 | ✓ |
+| | control units shared | 116 | 116 | ✓ |
+| | mean \|SMD\| after | 0.2190 | 0.2190 | ✓ |
+| | ATT (re78) | 1472.7 | 1472.7 | ✓ |
+
+‡ In *nearest, caliper 0.2 SD*, cohortmatch keeps NSW74 where MatchIt keeps NSW35. Those units have identical covariates and so a tied propensity score, which the order breaks arbitrarily. Balance is untouched; the ATT moves by their `re78` difference spread over 113 pairs.
+
+### Under cohortmatch's default order
+
+cohortmatch orders treated units by how scarce their eligible controls are, MatchIt by descending propensity score. The two then keep different treated subsets, so the balance below is achieved on a different matched-treated population and does not compare with MatchIt's figures above.
+
+| design | matched treated | shared with MatchIt | mean \|SMD\| after |
+|---|---|---|---|
+| nearest, caliper 0.2 SD | 110 | 82 of 113 | 0.0953 |
+| nearest, exact race | 116 | 73 of 116 | 0.0781 |
 
 ## Treatment effect vs MatchIt
 
@@ -56,7 +82,7 @@ The default estimation machinery, the auto caliper, and Rubin's B/R -- reconcile
 
 | quantity | cohortmatch | MatchIt/R | agree |
 |---|---|---|---|
-| full-sample logistic PS, max abs diff vs R glm | 1.0e-03 | 0 | ✓ |
+| full-sample logistic PS, max abs diff vs R glm | 1.7e-04 | 0 | ✓ |
 | auto caliper (0.2 x SD logit PS) | 0.3606 | 0.3609 | ✓ |
 | Rubin's B (1:1) | 86.01 | 86.01 | ✓ |
 | Rubin's R (1:1) | 0.771 | 0.771 | ✓ |
