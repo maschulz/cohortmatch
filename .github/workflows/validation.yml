@@ -24,15 +24,14 @@ jobs:
         with:
           use-public-rspm: true
 
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          packages: |
-            cran::MatchIt
-            cran::cobalt
-            cran::optmatch
-            cran::sandwich
-            cran::lmtest
-            cran::jsonlite
+      - name: Install R packages
+        run: |
+          Rscript -e '
+            pkgs <- c("MatchIt", "cobalt", "optmatch", "sandwich", "lmtest", "jsonlite")
+            install.packages(pkgs, Ncpus = max(1L, parallel::detectCores()))
+            missing <- pkgs[!pkgs %in% rownames(installed.packages())]
+            if (length(missing)) stop("failed to install: ", paste(missing, collapse = ", "))
+          '
 
       - name: Generate golden values with MatchIt
         run: Rscript validation/generate_golden.R
