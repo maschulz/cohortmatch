@@ -82,8 +82,8 @@ def estimate_propensity_scores(
             f"Unknown model type: {model_type}. Must be one of: {', '.join(valid_model_types)}"
         )
 
-    # Validate CV parameter
-    if cv < 2:
+    # Validate CV parameter (None means full-sample fit, no cross-fitting)
+    if cv is not None and cv < 2:
         raise ValueError(
             f"Number of cross-validation folds must be at least 2, got {cv}"
         )
@@ -94,9 +94,6 @@ def estimate_propensity_scores(
             "Install it with 'pip install scikit-learn'"
         )
 
-    logger.info(
-        f"Estimating propensity scores using {model_type} model with {cv}-fold cross-validation"
-    )
     # Create a copy of model_params to avoid modifying the original
     model_params = model_params.copy() if model_params else {}
 
@@ -108,42 +105,57 @@ def estimate_propensity_scores(
         f"Treatment prevalence: {np.mean(y):.3f} ({np.sum(y)} out of {len(y)} units)"
     )
 
-    # Standardize features for logistic regression
-    scaler = None
+    counts = np.unique(y, return_counts=True)[1]
+    min_class = int(counts.min()) if counts.size else 0
+    if min_class < 2:
+        raise ValueError(
+            "Too few units in the smaller treatment group to estimate "
+            f"propensity scores (need >= 2, have {min_class}). Provide "
+            "precomputed propensity_scores or use a covariate distance."
+        )
+
+    # Build the estimator. Logistic regression is standardized inside a
+    # pipeline, so scaling is fit within each cross-fit fold (no leakage) and
+    # on the full sample otherwise; the fitted pipeline is usable on raw data.
+    estimator = get_propensity_model(model_type, model_params, random_state)
     if model_type == "logistic":
-        logger.debug("Standardizing features for logistic regression")
-        scaler = StandardScaler()
-        X = scaler.fit_transform(X)
-
-    # Get the propensity model
-    model = get_propensity_model(model_type, model_params, random_state)
-
-    # Use cross-validation to estimate propensity scores without data leakage
-    cv_results = estimate_propensity_scores_with_cv(
-        X=X,
-        y=y,
-        model=model,
-        cv=cv,
-        random_state=random_state,
-    )
-
-    final_model = cv_results["final_model"]
-    if scaler is not None:
-        # ship the scaler with the model so it is usable on raw data
         from sklearn.pipeline import Pipeline
 
-        final_model = Pipeline([("scaler", scaler), ("model", final_model)])
+        estimator = Pipeline([("scaler", StandardScaler()), ("model", estimator)])
 
-    # Add propensity scores and model to the result
+    if cv is None:
+        # Full-sample fit: deterministic, MatchIt's convention.
+        logger.info(f"Estimating propensity scores ({model_type}, full sample)")
+        final_model = clone_model(estimator)
+        final_model.fit(X, y)
+        propensity_scores = final_model.predict_proba(X)[:, 1]
+        try:
+            auc = float(roc_auc_score(y, propensity_scores))
+        except ValueError:
+            auc = float("nan")
+        cv_results = {"fold_aucs": [], "mean_auc": auc, "std_auc": 0.0}
+    else:
+        # Cross-fitting: each unit scored out-of-fold to avoid overfit leakage.
+        logger.info(
+            f"Estimating propensity scores ({model_type}, {cv}-fold cross-fitting)"
+        )
+        cv_out = estimate_propensity_scores_with_cv(
+            X=X, y=y, model=estimator, cv=cv, random_state=random_state
+        )
+        propensity_scores = cv_out["propensity_scores"]
+        final_model = cv_out["final_model"]
+        auc = cv_out["auc"]
+        cv_results = cv_out["cv_results"]
+
     result = {
-        "propensity_scores": cv_results["propensity_scores"],
+        "propensity_scores": propensity_scores,
         "model": final_model,
-        "cv_results": cv_results["cv_results"],
+        "cv_results": cv_results,
         "model_type": model_type,
-        "auc": cv_results["auc"],
+        "auc": auc,
     }
 
-    logger.info(f"Propensity score estimation complete. AUC: {cv_results['auc']:.3f}")
+    logger.info(f"Propensity score estimation complete. AUC: {auc:.3f}")
     return result
 
 

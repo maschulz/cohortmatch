@@ -12,9 +12,27 @@ from cohortmatch.metrics.balance import (
     calculate_balance_stats,
     calculate_overall_balance,
     calculate_rubin_rules,
+    rubin_b_r,
     standardized_mean_difference,
     variance_ratio,
 )
+
+
+def test_rubin_b_r_on_logit_predictor():
+    """B ~ 0 and R ~ 1 when the two groups share a propensity distribution;
+    B is large and fails when the groups are separated.
+    """
+    rng = np.random.RandomState(0)
+    treated = np.array([True] * 200 + [False] * 200)
+
+    ps_bal = np.clip(rng.uniform(0.2, 0.8, 400), 0.01, 0.99)
+    bal = rubin_b_r(ps_bal, treated)
+    assert bal["rubin_B"] < 25 and bal["B_ok"]
+    assert 0.5 < bal["rubin_R"] < 2 and bal["R_ok"]
+
+    ps_sep = np.where(treated, 0.85, 0.15)
+    sep = rubin_b_r(ps_sep, treated)
+    assert sep["rubin_B"] > 25 and not sep["B_ok"]
 
 
 class TestBalanceMetrics:

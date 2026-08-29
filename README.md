@@ -89,10 +89,10 @@ score, the default for confounder control. Use `distance="mahalanobis"`
 to match directly in covariate space (no propensity model; scales via a
 KD-tree). All designs scale to biobank size.
 
-By default this estimates propensity scores with cross-fitted logistic
-regression (each unit is scored by a model that never saw it, over 5 folds),
-matches each treated unit to its nearest control (ATT), applies no caliper,
-and computes balance statistics.
+By default this estimates propensity scores with logistic regression fit on
+the full sample (deterministic, MatchIt's convention), matches each treated
+unit to its nearest control (ATT), applies no caliper, and computes balance
+statistics.
 
 **Data contract:** the treatment column is 0/1; the DataFrame index
 identifies units, must be unique, and has string or integer labels; column
@@ -205,12 +205,19 @@ selects a mean/risk difference ("linear", default; for a binary outcome
 this is an absolute difference in probabilities, not a relative effect), an
 odds ratio ("logistic"), or a risk ratio ("poisson"); hazard ratios are a
 five-line recipe (see "Effects on the matched sample"). The `measure`
-column records what the effect is. Standard errors are cluster-robust on match groups (matching
-without replacement) or HC1-robust (with replacement); the `se_type` column
-records which. One caveat: all standard errors assume errors independent across
+column records what the effect is. Standard errors are cluster-robust on match
+groups (matching without replacement) or heteroskedasticity-robust otherwise
+(HC3 for the linear model, HC0 for the GLM); the `se_type` column records
+which, and cohortmatch warns when there are too few match groups for reliable
+cluster-robust inference. All standard errors assume errors independent across
 match groups; spatially or network-correlated outcomes need external
 correction. The estimand is inherited from the matching design; there is no
 way to relabel an ATT matched sample as ATE after the fact.
+
+`method="regression_adjustment"` adds the covariates to the outcome model and
+reports the treatment coefficient; that equals the target estimand only if the
+treatment effect does not vary with the covariates. When unsure, use the
+default `mean_difference`, which targets the matched estimand directly.
 
 ### Effects on the matched sample: the handoff
 
@@ -268,7 +275,8 @@ without a caliper retains all 185 treated but leaves a maximum |SMD| of
 believing any effect; `caliper="auto"` is the standard remedy.
 
 ```python
-# the standard choice: 0.2 SD of the logit propensity score (Austin 2011)
+# the standard choice: 0.2 x SD of the logit propensity over the full sample
+# (MatchIt's std.caliper convention; differs from Austin 2011's pooled-within SD)
 match(data, treatment="treated", covariates=covs, caliper="auto")
 
 # same rule, different width
@@ -296,9 +304,11 @@ calipers are always in raw distance units.
 
 ### Propensity scores
 
-When scores are needed and none are supplied, cohortmatch fits logistic
-regression with 5-fold cross-fitting, so each unit's score comes from a model
-that did not see it. No calibration is applied.
+When scores are needed and none are supplied, cohortmatch fits L2-regularized
+logistic regression on the full sample, so the default is deterministic (no
+seed needed). Pass `cv=k` to cross-fit instead, scoring each unit with a model
+that did not see it (useful mainly for flexible `propensity_model`s that can
+overfit). No calibration is applied.
 
 ```python
 # any sklearn classifier; it is cloned, your object is not touched
@@ -306,14 +316,17 @@ from sklearn.ensemble import GradientBoostingClassifier
 match(data, treatment="treated", covariates=covs,
       propensity_model=GradientBoostingClassifier())
 
+# cross-fit the scores over 5 folds (set random_state for reproducibility)
+match(data, treatment="treated", covariates=covs, cv=5, random_state=0)
+
 # precomputed scores: a column name, Series, or array
 match(data, treatment="treated", covariates=covs, propensity_scores="ps")
 ```
 
 `result.propensity_scores` returns the scores as a Series aligned to your
 data's index; `result.propensity_model` a fitted pipeline usable on raw
-covariates; `result.propensity_metrics` the cross-validated AUC and overlap
-diagnostics.
+covariates; `result.propensity_metrics` the AUC (cross-validated when `cv` is
+set, in-sample otherwise) and overlap diagnostics.
 
 ### Common support
 
@@ -369,6 +382,12 @@ few clusters). Subclassification is validated against MatchIt; CEM's default
 binning is Sturges' rule per continuous covariate. Note CEM is a different
 design, not a drop-in sensitivity swap for pair matching: there is no ratio
 or caliper; closeness is expressed through the coarsening.
+
+> **Trimmed ATE:** strata (or CEM cells) that contain only one group carry no
+> information and are dropped, with a warning. `estimand="ate"` then estimates
+> the ATE over the *retained overlap population* — the units in mixed strata —
+> not necessarily the whole sample. With sparse cells the two can differ; check
+> the warning and the matched counts.
 
 ### Risk-set matching (nested case-control)
 
@@ -493,7 +512,7 @@ the caliper, drop exact constraints, or check that the groups overlap.
 | `exact` | `None` | all | column(s) that must match exactly |
 | `propensity_scores` | `None` | all | precomputed scores (column, Series, or array) |
 | `propensity_model` | `None` | all | sklearn classifier to estimate scores |
-| `cv` | `5` | estimated scores | cross-fitting folds |
+| `cv` | `None` | estimated scores | `None` fits on the full sample; an int opts into that many cross-fitting folds |
 | `discard` | `None` | all | common-support discard before matching |
 | `algorithm` | `"auto"` | nearest | `"exact"`, `"approximate"`, or size-dependent |
 | `m_order` | hardest-first | nearest | matching order (`"largest"`, `"smallest"`, `"closest"`, `"random"`, `"data"`) |
@@ -506,6 +525,26 @@ the caliper, drop exact constraints, or check that the groups overlap.
 docstrings. Warnings are typed (`IncompleteMatchWarning`,
 `CommonSupportWarning`, `ApproximateMatchWarning`), so they can be filtered
 individually.
+
+### Inference caveats
+
+The built-in confidence intervals and p-values are for the standard designs
+and come with limits worth knowing:
+
+- **They condition on the propensity scores as if known.** When scores are
+  estimated (the default), the intervals do not propagate that first-stage
+  uncertainty; the true variance can be larger or smaller (Abadie & Imbens
+  2016). Supplying externally estimated scores does not change this.
+- **Robust SEs assume independence across match groups.** Cluster-robust
+  (without replacement) and HC-robust (replacement, strata) inference is
+  unreliable with few clusters — cohortmatch warns below ten — and does not
+  cover spatial or network correlation.
+- **`regression_adjustment` returns a conditional coefficient**, which is the
+  target estimand only without treatment–covariate interaction.
+
+Treat the built-in intervals as a reasonable default, not a substitute for a
+design-specific variance procedure when coverage matters; the handoff above
+exports the weights and groups for external inference.
 
 ### How to cite
 

@@ -25,9 +25,12 @@ def get_caliper_for_matching(
     """Resolve the caliper threshold from the configuration.
 
     Numeric values pass through unchanged. "auto" is only defined for
-    propensity/logit calipers: `caliper_scale` standard deviations of the
-    logit propensity score (default 0.2, Austin 2011). The threshold is in
-    logit units and must be applied to logit-scale distances.
+    propensity/logit calipers: `caliper_scale` (default 0.2) times the SD of
+    the logit propensity score over the full sample -- MatchIt's standardized-
+    caliper convention on the logit scale. Note this differs from Austin
+    (2011), whose rule uses the pooled within-group SD; the two coincide only
+    when the groups are not separated on the score. The threshold is in logit
+    units and must be applied to logit-scale distances.
 
     Returns:
         Caliper value, or None if no caliper is configured.

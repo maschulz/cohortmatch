@@ -3,11 +3,14 @@
 Effects are estimated by weighted least squares on the matched sample using
 the matching weights. Standard errors account for the matched design:
 cluster-robust on match groups when subclass membership is available
-(matching without replacement), heteroskedasticity-robust (HC1) otherwise.
-This mirrors the workflow recommended in the MatchIt documentation
-(weighted outcome regression + cluster-robust variance).
+(matching without replacement), otherwise heteroskedasticity-robust: HC3 for
+the weighted linear model (MatchIt's recommendation for non-paired analyses)
+and HC0 for the weighted GLM (statsmodels' GLM sandwich is HC0 regardless of
+the requested variant). This mirrors the workflow recommended in the MatchIt
+documentation (weighted outcome regression + cluster-robust variance).
 """
 
+import warnings
 from typing import Any
 
 import numpy as np
@@ -20,6 +23,20 @@ logger = get_logger(__name__)
 
 VALID_METHODS = {"mean_difference", "regression_adjustment"}
 VALID_FAMILIES = {"linear", "logistic", "poisson"}
+
+# Below this many match groups, cluster-robust standard errors are unreliable
+# (the sandwich is severely anti-conservative with few clusters).
+_MIN_CLUSTERS = 10
+
+
+def _warn_few_clusters(n_clusters: int) -> None:
+    if n_clusters < _MIN_CLUSTERS:
+        warnings.warn(
+            f"Cluster-robust inference with only {n_clusters} match groups may "
+            "be unreliable; the sandwich variance is anti-conservative with few "
+            "clusters.",
+            stacklevel=3,
+        )
 
 
 def estimate_treatment_effect(
@@ -53,7 +70,8 @@ def estimate_treatment_effect(
             combined with regression adjustment.
         weights: Matching weights indexed by unit (defaults to 1).
         subclass: Match-group membership indexed by unit. When given,
-            standard errors are cluster-robust on these groups; otherwise HC1.
+            standard errors are cluster-robust on these groups; otherwise
+            HC3 (linear) or HC0 (GLM).
         confidence_level: Level for the confidence interval.
 
     Returns:
@@ -199,11 +217,12 @@ def _wls_effect(
             model = sm.WLS(y[valid], X[valid], weights=w[valid])
             groups = groups[valid]
         codes = pd.factorize(groups)[0]
+        _warn_few_clusters(len(np.unique(codes)))
         fit = model.fit(cov_type="cluster", cov_kwds={"groups": codes}, use_t=True)
         se_type = "cluster-robust (match groups)"
     else:
-        fit = model.fit(cov_type="HC1", use_t=True)
-        se_type = "HC1-robust"
+        fit = model.fit(cov_type="HC3", use_t=True)
+        se_type = "HC3-robust"
 
     treat_ix = 1  # column order: const, treatment, covariates...
     alpha = 1 - confidence_level
@@ -267,11 +286,14 @@ def _glm_effect(
             model = sm.GLM(y[valid], X[valid], family=glm_family, var_weights=w[valid])
             groups = groups[valid]
         codes = pd.factorize(groups)[0]
+        _warn_few_clusters(len(np.unique(codes)))
         fit = _fit_glm_robust(model, cov_type="cluster", cov_kwds={"groups": codes})
         se_type = "cluster-robust (match groups)"
     else:
-        fit = _fit_glm_robust(model, cov_type="HC1")
-        se_type = "HC1-robust"
+        # statsmodels' GLM sandwich is HC0 for every HCx variant, so label it
+        # honestly rather than claiming a small-sample correction it doesn't do.
+        fit = _fit_glm_robust(model, cov_type="HC0")
+        se_type = "HC0-robust"
 
     treat_ix = 1
     alpha = 1 - confidence_level

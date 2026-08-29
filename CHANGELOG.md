@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.0] - 2026-07-19
+## [0.1.0] - 2026-08-29
 
 First release of CohortMatch, the successor to cohortbalancer3. The matching
 internals carry over; the public API is new.
@@ -43,9 +43,11 @@ internals carry over; the public API is new.
     membership (`result.match_groups`). With `replace=True`, `matched_data` now
     contains each unit once under its original id; reuse is expressed through
     the weights instead of duplicated `_dup` rows.
--   Effect estimation by weighted least squares with cluster-robust standard
-    errors on match groups (HC1-robust with replacement); `se_type` column in
-    the effects table.
+-   Effect estimation by weighted outcome models with the matching weights:
+    cluster-robust standard errors on match groups, else heteroskedasticity-
+    robust (HC3 for the linear model, HC0 for the GLM); the `se_type` column
+    records which, and a warning fires when too few match groups remain for
+    reliable cluster-robust inference.
 -   `result.table1()`: group means/SDs with SMDs, before and after matching.
 -   Balance follows cobalt conventions: signed SMDs standardized by the
     anchor group's SD in the original sample (same denominator before and
@@ -53,15 +55,24 @@ internals carry over; the public API is new.
     (treated variance / control variance).
 -   Plot methods on the result: `plot_love_plot()`, `plot_balance()`,
     `plot_propensity()`, `plot_match_distances()`.
--   `result.rubin_statistics` and a Rubin's-rules line in `summary()`.
+-   `result.rubin_statistics` reports Rubin's B and R on the propensity linear
+    predictor, alongside a per-covariate balance-threshold summary; both appear
+    in `summary()`.
 -   `match()` as the single entry point, returning a `MatchResult` with
     `matched_data`, `pairs`, `balance`, `propensity_scores`, `summary()`,
     `estimate_effects()`, and `supplement()`.
 -   `estimand="att"|"atc"` on `match()` selects which group anchors the
     matching. Replaces the previous behavior of silently matching from
     whichever group was smaller.
--   `propensity_model` accepts any sklearn classifier (cloned, cross-fitted);
-    `propensity_scores` accepts a column name, Series, or array.
+-   Propensity scores are fit on the full sample by default, so an unseeded run
+    is deterministic; pass `cv=k` to cross-fit over k folds, with feature
+    scaling fit inside each fold. `propensity_model` accepts any sklearn
+    classifier (cloned); `propensity_scores` accepts a column name, Series, or
+    array.
+-   `method="optimal"` returns the minimum-total-distance matching, including
+    true 1:k ratio matching, via sparse min-cost bipartite assignment; exact
+    and caliper constraints are honored as absent edges.
+-   `covariate_weights` are validated as non-negative and finite.
 -   `engine="auto"` selects between the dense distance matrix and a
     memory-efficient prefiltered path based on `memory_limit_gb`, so large
     cohorts never hit an out-of-memory crash.

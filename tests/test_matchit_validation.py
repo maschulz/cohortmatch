@@ -1,9 +1,10 @@
 """Golden-value validation against R's MatchIt/cobalt on the Lalonde data.
 
 `validation/generate_golden.R` fits one full-sample logistic propensity model
-and exports its scores; both sides then match on those identical scores, so
-these tests compare the matching and the diagnostics, not propensity
-estimation.
+and exports its scores; most tests then match on those identical scores, so
+they compare the matching and the diagnostics in isolation. A separate test
+checks that cohortmatch's own full-sample logistic reproduces R's glm scores,
+validating the default estimation machinery end to end.
 
 Comparison tightness varies by design:
 - Unadjusted SMDs: exact (1e-6) — same data, same convention, no matching.
@@ -200,8 +201,72 @@ class TestSubclassification:
 
         effects = result.estimate_effects("re78")
         assert effects["effect"].iloc[0] == pytest.approx(
-            g["att"], abs=0.5 * g["att_se"]
+            g["att"], abs=0.5 * g["att_se_hc3"]
         )
+        # HC3-robust SE reconciles with R's sandwich::vcovHC(fit, "HC3")
+        assert effects["se_type"].iloc[0] == "HC3-robust"
+        assert effects["standard_error"].iloc[0] == pytest.approx(
+            g["att_se_hc3"], rel=0.02
+        )
+
+
+class TestEstimatorAndDiagnosticGolden:
+    """Reconcile the pieces the injected-score golden could not: the default
+    estimation machinery, the auto caliper, and Rubin's B/R."""
+
+    def test_full_sample_logistic_matches_r_glm(self, lalonde, golden):
+        # cohortmatch's full-sample unregularized logistic reproduces R's glm
+        # propensity scores -- validating the default estimation machinery
+        # end to end (the shipped default is L2-regularized; penalty=None here
+        # isolates the machinery from the regularization choice).
+        import warnings
+
+        from sklearn.linear_model import LogisticRegression
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = match(
+                lalonde,
+                treatment="treat",
+                covariates=COVS,
+                propensity_model=LogisticRegression(
+                    penalty=None, solver="lbfgs", max_iter=5000
+                ),
+                caliper="auto",
+                engine="exact",
+            )
+        cohort_ps = result.propensity_scores
+        r_ps = pd.Series(golden["ps"]).reindex(cohort_ps.index)
+        assert np.max(np.abs(cohort_ps.to_numpy() - r_ps.to_numpy())) < 5e-3
+
+    def test_auto_caliper_matches_matchit(self, lalonde, golden):
+        # cohortmatch's caliper="auto" equals MatchIt's std.caliper on the
+        # logit linear predictor (0.2 x whole-sample SD of the logit PS).
+        from cohortmatch.datatypes import MatcherConfig
+        from cohortmatch.metrics.utils import get_caliper_for_matching
+
+        config = MatcherConfig(
+            treatment_col="treat",
+            covariates=COVS,
+            caliper_method="propensity",
+            caliper_value="auto",
+            caliper_scale=0.2,
+        )
+        cal = get_caliper_for_matching(
+            config, propensity_scores=lalonde["ps"].to_numpy()
+        )
+        assert cal == pytest.approx(golden["auto_caliper"], rel=2e-3)
+
+    def test_rubin_b_r_reconciles(self, lalonde, golden):
+        # On the 1:1 design both sides match the same units, so Rubin's B and R
+        # on the propensity linear predictor reconcile exactly.
+        g = golden["designs"]["nearest_1to1"]
+        if "rubin_B" not in g:
+            pytest.skip("golden.json predates Rubin B/R")
+        result = run_design(lalonde, golden, "nearest_1to1")
+        rs = result.rubin_statistics
+        assert rs["rubin_B"] == pytest.approx(g["rubin_B"], rel=1e-3)
+        assert rs["rubin_R"] == pytest.approx(g["rubin_R"], rel=1e-3)
 
 
 class TestCovariateAndEffectGolden:
@@ -257,7 +322,7 @@ class TestCovariateAndEffectGolden:
 
     def test_logistic_effect_reconciles(self, lalonde, golden):
         # pure estimator reconciliation: same data, same (unit) weights, no
-        # matching in between, so our weighted logistic OR + HC1 sandwich must
+        # matching in between, so our weighted logistic OR + HC0 sandwich must
         # match R's glm + vcovHC tightly
         if "logistic_effect" not in golden["designs"]:
             pytest.skip("golden.json predates the logistic_effect design")
@@ -272,8 +337,8 @@ class TestCovariateAndEffectGolden:
             family="logistic",
             estimand="att",
         )
-        # OR matches R exactly; the SE differs by the HC1 finite-sample factor
-        # sqrt(n/(n-k)) ~ 0.16% because statsmodels' GLM cov_type="HC1" returns
-        # HC0 (documented in DESIGN.md), so reconcile the SE within that margin
+        # OR matches R exactly; our GLM SE is HC0 (statsmodels' GLM sandwich is
+        # HC0 for any HCx), while the R golden uses vcovHC(HC1), so they differ
+        # by the finite-sample factor sqrt(n/(n-k)) ~ 0.16%
         assert eff["effect"] == pytest.approx(g["odds_ratio"], rel=1e-4)
         assert eff["standard_error"] == pytest.approx(g["se"], rel=0.01)

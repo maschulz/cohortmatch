@@ -231,13 +231,21 @@ def build_supplement(result, title: str | None = None) -> str:
     lines.append(_md_table(t1))
     bal_idx = internal.balance_index or {}
     rubin = result.rubin_statistics or {}
+    rubin_txt = ""
+    if "rubin_B" in rubin and pd.notna(rubin["rubin_B"]):
+        rubin_txt = (
+            f"Rubin's B={rubin['rubin_B']:.0f} (target <25) and R="
+            f"{rubin['rubin_R']:.2f} (target 0.5-2) on the propensity linear "
+            "predictor; "
+        )
     lines.append(
         f"\nMean |SMD| {bal_idx.get('mean_smd_before', float('nan')):.3f} before "
         f"vs {bal_idx.get('mean_smd_after', float('nan')):.3f} after matching; "
-        f"{rubin.get('pct_both_good', float('nan')):.0f}% of covariates satisfy "
-        "Rubin's rules (|SMD| < 0.25, variance ratio in [0.5, 2]). SMDs are "
-        "signed and standardized by the anchor group's standard deviation in "
-        "the original sample (identical denominator before and after). Binary "
+        f"{rubin_txt}"
+        f"{rubin.get('pct_both_good', float('nan')):.0f}% of covariates fall "
+        "within the |SMD| < 0.25 and variance-ratio [0.5, 2] thresholds. SMDs "
+        "are signed and standardized by the anchor group's standard deviation "
+        "in the original sample (identical denominator before and after). Binary "
         "variables are shown as n (%)."
     )
     metrics = result.propensity_metrics or {}

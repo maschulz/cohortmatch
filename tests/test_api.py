@@ -701,7 +701,7 @@ class TestInference:
         assert effects["effect"].iloc[0] == pytest.approx(2.0, abs=1.0)
         assert np.isfinite(effects["standard_error"].iloc[0])
 
-    def test_hc1_se_with_replacement(self):
+    def test_hc3_se_with_replacement(self):
         result = match(
             make_data(n_treat=50, n_control=20),
             treatment="treatment",
@@ -709,7 +709,7 @@ class TestInference:
             replace=True,
         )
         effects = result.estimate_effects("outcome")
-        assert effects["se_type"].iloc[0] == "HC1-robust"
+        assert effects["se_type"].iloc[0] == "HC3-robust"
 
     def test_weighted_effect_matches_manual_computation(self):
         result = match(
@@ -1155,7 +1155,7 @@ class TestStrataMethods:
         assert result.estimand == "ate"
         effects = result.estimate_effects("outcome")
         assert effects["effect"].iloc[0] == pytest.approx(2.0, abs=1.0)
-        assert effects["se_type"].iloc[0] == "HC1-robust"
+        assert effects["se_type"].iloc[0] == "HC3-robust"
 
     def test_cem_basic(self):
         data = make_data(n_treat=100, n_control=300)

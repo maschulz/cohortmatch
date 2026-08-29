@@ -116,8 +116,12 @@ def covariate_nn_match(
         )
 
     available = np.ones(n_control, dtype=bool)
+    # Without replacement a control is retired once used; with replacement it
+    # stays available across anchors (each anchor still takes distinct controls
+    # for its own ratio, guaranteed by the distinct KD-tree neighbours).
+    respect_avail = not getattr(config, "replace", False)
     match_pairs: dict[int, list[int]] = {i: [] for i in range(n_treat)}
-    match_distances: list[float] = []
+    pair_dist: dict[tuple[int, int], float] = {}
 
     for t_pos in order:
         s = strata_treat[t_pos]
@@ -148,7 +152,7 @@ def covariate_nn_match(
                     found = matches_per_unit
                     break
                 c_pos = int(local_to_global[local])
-                if not available[c_pos]:
+                if respect_avail and not available[c_pos]:
                     continue
                 if any(
                     abs(cc_control[c][c_pos] - cc_treat[c][t_pos]) > thr
@@ -156,8 +160,9 @@ def covariate_nn_match(
                 ):
                     continue
                 match_pairs[t_pos].append(c_pos)
-                match_distances.append(float(d))
-                available[c_pos] = False
+                pair_dist[(t_pos, c_pos)] = float(d)
+                if respect_avail:
+                    available[c_pos] = False
                 found += 1
                 if found >= matches_per_unit:
                     break
@@ -169,6 +174,12 @@ def covariate_nn_match(
                 break
             k = min(len(local_to_global), k * 4)
 
+    # Flatten distances in anchor-major order so they align index-for-index
+    # with the pairs the pipeline builds (which iterates match_pairs the same
+    # way), regardless of the matching order used above.
+    match_distances = [
+        pair_dist[(t, c)] for t in range(n_treat) for c in match_pairs[t]
+    ]
     n_matched = sum(1 for v in match_pairs.values() if v)
     logger.info(
         f"Covariate-distance matching complete: {n_matched}/{n_treat} anchors matched"

@@ -285,8 +285,8 @@ def validate_matcher_config(config) -> None:
                 f"propensity_model must be one of {valid_propensity_models}, got {config.propensity_model}"
             )
 
-        # Validate CV folds
-        if config.cv_folds <= 1:
+        # Validate CV folds (None means full-sample fit, no cross-fitting)
+        if config.cv_folds is not None and config.cv_folds <= 1:
             raise ValueError(f"cv_folds must be greater than 1, got {config.cv_folds}")
 
     logger.info("Matcher configuration validation successful")

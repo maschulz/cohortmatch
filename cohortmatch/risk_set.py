@@ -336,9 +336,12 @@ class RiskSetResult:
     ) -> pd.DataFrame:
         """Conditional logistic regression of case status on exposure(s).
 
-        Under incidence-density sampling the odds ratio estimates the hazard
-        ratio of the exposure. One model is fit per exposure, each adjusted
-        for `adjustment_covariates`.
+        Under incidence-density sampling with random control selection the odds
+        ratio estimates the hazard ratio of the exposure. This does not hold
+        cleanly when controls are chosen non-randomly (nearest-neighbor
+        selection or continuous-caliper restriction); adjust for any selection
+        covariates via `adjustment_covariates` in that case. One model is fit
+        per exposure.
 
         Args:
             exposures: Exposure column(s); must be numeric.

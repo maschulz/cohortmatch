@@ -104,12 +104,15 @@ def match(
             `data`, a Series aligned to `data.index`, or an array of
             length len(data). Mutually exclusive with `propensity_model`.
         propensity_model: An sklearn-compatible classifier used to estimate
-            propensity scores. The estimator is cloned; scores are estimated
-            out-of-fold with `cv`-fold cross-fitting. If neither this nor
-            `propensity_scores` is given and scores are needed, logistic
-            regression is used.
-        cv: Number of cross-fitting folds for propensity estimation (>= 2,
-            default 5). Only meaningful when scores are estimated.
+            propensity scores. The estimator is cloned and, by default, fit on
+            the full sample; pass `cv` to estimate scores out-of-fold instead.
+            If neither this nor `propensity_scores` is given and scores are
+            needed, logistic regression is used.
+        cv: Cross-fitting folds for propensity estimation. None (default) fits
+            the score on the full sample (deterministic, MatchIt's convention);
+            an integer >= 2 opts into k-fold cross-fitting, where each unit is
+            scored by a model that did not see it. Only meaningful when scores
+            are estimated.
         engine: Compute strategy (distinct from `method`, which picks the
             matching algorithm). "exact" builds the full distance matrix;
             "approximate" is memory-bounded ("nearest" only), a
@@ -200,7 +203,8 @@ def match(
             "cv only applies when propensity scores are estimated; remove it "
             "or remove propensity_scores"
         )
-    cv = 5 if cv is None else cv
+    # cv is None -> fit the propensity score on the full sample (deterministic,
+    # MatchIt's convention). cv=k -> opt into k-fold cross-fitting.
     if m_order == "closest" and engine == "approximate":
         raise ValueError(
             "m_order='closest' requires the dense distance matrix; use "
@@ -280,6 +284,14 @@ def match(
             "assignment already uses each control at most once. Use "
             "method='nearest' for matching with replacement."
         )
+
+    if covariate_weights is not None:
+        for col, value in covariate_weights.items():
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(
+                    f"covariate_weights['{col}'] must be non-negative and finite, "
+                    f"got {value}"
+                )
 
     # --- caliper translation ------------------------------------------------
     caliper_method, caliper_value, caliper_scale = _resolve_caliper(
@@ -1010,18 +1022,28 @@ class MatchResult:
         """Matched pairs: treatment_id, control_id, distance, match_group.
 
         `match_group` groups the rows belonging to one anchor unit (relevant
-        for ratio > 1). `distance` is NaN when the approximate algorithm was
-        used (no dense distance matrix exists).
+        for ratio > 1). `distance` is NaN only on the propensity approximate
+        path, which never forms a dense distance matrix; the covariate
+        approximate (KD-tree) path reports its exact distances.
         """
         rows = []
         distance_lookup = self._distance_lookup()
         control_anchored = self._results.anchor == "control"
-        for t_id, c_id in self._results.pairs:
+        # The covariate approximate path has no dense matrix but does compute
+        # exact distances, aligned index-for-index with the pairs list.
+        md = self._results.match_distances
+        use_md = (
+            self._results.distance_matrix is None
+            and md is not None
+            and len(md) == len(self._results.pairs)
+            and self._results.config.distance_method in ("mahalanobis", "euclidean")
+        )
+        for i, (t_id, c_id) in enumerate(self._results.pairs):
             rows.append(
                 {
                     "treatment_id": t_id,
                     "control_id": c_id,
-                    "distance": distance_lookup(t_id, c_id),
+                    "distance": md[i] if use_md else distance_lookup(t_id, c_id),
                     "match_group": c_id if control_anchored else t_id,
                 }
             )
@@ -1163,8 +1185,28 @@ class MatchResult:
 
     @property
     def rubin_statistics(self) -> dict | None:
-        """Rubin's rules balance summary (SMD < 0.25, variance ratios in [0.5, 2])."""
-        return self._results.rubin_statistics
+        """Rubin's B and R on the propensity-score linear predictor, plus a
+        per-covariate balance-threshold summary.
+
+        `rubin_B` is the standardized difference in mean linear propensity
+        between groups (target |B| < 25); `rubin_R` is the ratio of their
+        variances (target 0.5 < R < 2). Both are absent when no propensity
+        score is available (covariate-distance matching). The `pct_*`/`n_*`
+        fields count covariates within the |SMD| < 0.25 and variance-ratio
+        thresholds -- a separate diagnostic, not Rubin's B/R.
+        """
+        base = dict(self._results.rubin_statistics or {})
+        ps = self.propensity_scores
+        md = self.matched_data
+        if ps is not None and not md.empty:
+            from cohortmatch.metrics.balance import rubin_b_r
+
+            treated = (md[self._results.config.treatment_col] == 1).to_numpy()
+            ps_matched = ps.reindex(md.index).to_numpy()
+            w = self.weights
+            w_matched = w.reindex(md.index).to_numpy() if w is not None else None
+            base.update(rubin_b_r(ps_matched, treated, w_matched))
+        return base or None
 
     @property
     def estimand(self) -> str:
@@ -1195,13 +1237,17 @@ class MatchResult:
 
         Estimation is a weighted outcome model with the matching weights.
         Standard errors are cluster-robust on match groups (matching without
-        replacement) or HC1-robust (with replacement); the `se_type` column
+        replacement) or heteroskedasticity-robust otherwise (HC3 for the
+        weighted linear model, HC0 for the weighted GLM); the `se_type` column
         records which was used.
 
         Args:
             outcomes: Outcome column(s) in the matched data.
             method: "mean_difference" (treatment only) or
-                "regression_adjustment" (adds covariates to the model).
+                "regression_adjustment" (adds covariates to the model). The
+                latter reports the treatment coefficient, which equals the
+                target estimand only if the effect does not vary with the
+                covariates; prefer "mean_difference" when unsure.
             family: "linear" (mean difference; risk difference for binary
                 outcomes), "logistic" (marginal odds ratio), or "poisson"
                 (marginal risk ratio). Nonlinear families fit the
@@ -1227,7 +1273,7 @@ class MatchResult:
             raise ValueError(f"outcome columns not in matched data: {missing}")
 
         # cluster on match groups for pair designs; stratum designs have far
-        # too few strata for valid cluster inference, so they use HC1
+        # too few strata for valid cluster inference, so they use HC-robust
         is_strata = self._settings.get("method") in ("subclass", "cem")
         effects = estimate_multiple_outcomes(
             data=matched,
@@ -1377,9 +1423,15 @@ class MatchSummary:
                 f"{self.n_imbalanced} of {self.n_covariates}",
             ]
         rubin = r.rubin_statistics
+        if rubin and "rubin_B" in rubin and np.isfinite(rubin["rubin_B"]):
+            lines.append(
+                f"  Rubin's B={rubin['rubin_B']:.0f} (target <25), "
+                f"R={rubin['rubin_R']:.2f} (target 0.5-2)"
+            )
         if rubin and rubin.get("n_variables_total"):
             lines.append(
-                f"  Rubin's rules: {rubin.get('pct_both_good', float('nan')):.0f}% of covariates "
-                f"with |SMD| < 0.25 and variance ratio in [0.5, 2]"
+                f"  Covariates within thresholds: "
+                f"{rubin.get('pct_both_good', float('nan')):.0f}% "
+                f"(|SMD| < 0.25 and variance ratio in [0.5, 2])"
             )
         return "\n".join(lines)

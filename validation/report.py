@@ -19,7 +19,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from cohortmatch import cem, match  # noqa: E402
+from cohortmatch import cem, match, subclassify  # noqa: E402
 from cohortmatch.datasets import load_lalonde  # noqa: E402
 from cohortmatch.metrics.treatment import estimate_treatment_effect  # noqa: E402
 
@@ -203,6 +203,88 @@ def main() -> None:
         w(
             f"| | robust SE | {e['standard_error']:.4f} | {lg['se']:.4f} | "
             f"{_rel_agree(e['standard_error'], lg['se'], 0.01)} |"
+        )
+    w("")
+
+    # --- estimator, caliper, diagnostics ------------------------------------
+    w("## Estimator, caliper, and diagnostics vs MatchIt\n")
+    w(
+        "The default estimation machinery, the auto caliper, and Rubin's B/R -- "
+        "reconciled against R directly rather than through injected scores.\n"
+    )
+    w("| quantity | cohortmatch | MatchIt/R | agree |")
+    w("|---|---|---|---|")
+
+    from sklearn.linear_model import LogisticRegression  # noqa: E402
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        est = match(
+            data,
+            treatment="treat",
+            covariates=COVS,
+            propensity_model=LogisticRegression(
+                penalty=None, solver="lbfgs", max_iter=5000
+            ),
+            caliper="auto",
+            engine="exact",
+        )
+    r_ps = pd.Series(golden["ps"]).reindex(est.propensity_scores.index)
+    max_dps = float(np.max(np.abs(est.propensity_scores.to_numpy() - r_ps.to_numpy())))
+    w(
+        f"| full-sample logistic PS, max abs diff vs R glm | {max_dps:.1e} | 0 | "
+        f"{'✓' if max_dps < 5e-3 else '✗'} |"
+    )
+
+    from cohortmatch.datatypes import MatcherConfig  # noqa: E402
+    from cohortmatch.metrics.utils import get_caliper_for_matching  # noqa: E402
+
+    cfg = MatcherConfig(
+        treatment_col="treat",
+        covariates=COVS,
+        caliper_method="propensity",
+        caliper_value="auto",
+        caliper_scale=0.2,
+    )
+    cal = get_caliper_for_matching(cfg, propensity_scores=data["ps"].to_numpy())
+    w(
+        f"| auto caliper (0.2 x SD logit PS) | {cal:.4f} | "
+        f"{golden['auto_caliper']:.4f} | {_rel_agree(cal, golden['auto_caliper'], 2e-3)} |"
+    )
+
+    n1 = designs["nearest_1to1"]
+    if "rubin_B" in n1:
+        rs = match(
+            data,
+            treatment="treat",
+            covariates=COVS,
+            propensity_scores="ps",
+            estimand="att",
+            engine="exact",
+        ).rubin_statistics
+        w(
+            f"| Rubin's B (1:1) | {rs['rubin_B']:.2f} | {n1['rubin_B']:.2f} | "
+            f"{_rel_agree(rs['rubin_B'], n1['rubin_B'], 1e-3)} |"
+        )
+        w(
+            f"| Rubin's R (1:1) | {rs['rubin_R']:.3f} | {n1['rubin_R']:.3f} | "
+            f"{_rel_agree(rs['rubin_R'], n1['rubin_R'], 1e-3)} |"
+        )
+
+    sg = designs.get("subclass_6")
+    if sg and "att_se_hc3" in sg:
+        sc = subclassify(
+            data,
+            treatment="treat",
+            covariates=COVS,
+            propensity_scores="ps",
+            n_subclasses=6,
+            estimand="att",
+        )
+        se = sc.estimate_effects("re78").iloc[0]["standard_error"]
+        w(
+            f"| subclass HC3 SE vs R vcovHC(HC3) | {se:.1f} | "
+            f"{sg['att_se_hc3']:.1f} | {_rel_agree(se, sg['att_se_hc3'], 0.02)} |"
         )
     w("")
 

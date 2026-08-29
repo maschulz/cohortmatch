@@ -50,6 +50,18 @@ Weighted effect on `re78` with cluster-robust SEs on match groups.
 | full cohort | odds ratio (glm) | 0.921114 | 0.921114 | ✓ |
 | | robust SE | 0.2064 | 0.2067 | ✓ |
 
+## Estimator, caliper, and diagnostics vs MatchIt
+
+The default estimation machinery, the auto caliper, and Rubin's B/R -- reconciled against R directly rather than through injected scores.
+
+| quantity | cohortmatch | MatchIt/R | agree |
+|---|---|---|---|
+| full-sample logistic PS, max abs diff vs R glm | 1.0e-03 | 0 | ✓ |
+| auto caliper (0.2 x SD logit PS) | 0.3606 | 0.3609 | ✓ |
+| Rubin's B (1:1) | 86.01 | 86.01 | ✓ |
+| Rubin's R (1:1) | 0.771 | 0.771 | ✓ |
+| subclass HC3 SE vs R vcovHC(HC3) | 840.4 | 841.6 | ✓ |
+
 ## At biobank scale (20,000 × 480,000)
 
 A synthetic cohort matched on a shared propensity score with the same caliper in both implementations.

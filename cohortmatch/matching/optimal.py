@@ -1,17 +1,25 @@
-"""Optimal matching algorithm implementation using the Hungarian algorithm.
+"""Optimal matching via minimum-cost bipartite assignment.
 
-This module provides an implementation of the optimal matching algorithm,
-which finds the matching that minimizes the total distance across all pairs.
+The matching that minimizes total distance is found with a sparse min-cost
+full matching (``scipy.sparse.csgraph.min_weight_full_bipartite_matching``).
+Forbidden pairs (exact-stratum or caliper violations) are simply absent from
+the graph, so there is no large-sentinel arithmetic to misfire when the
+permitted distances are small or zero. Ratio (1:k) matching duplicates each
+treated node k times and solves once, giving the true global 1:k optimum
+rather than a sequence of greedy 1:1 rounds. A per-slot dummy "no-match"
+column at a dominating cost lets anchors that cannot be matched drop out, so
+the solver maximizes the number of real matches and then minimizes total
+distance.
 """
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import linear_sum_assignment
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import min_weight_full_bipartite_matching
 
 from cohortmatch.matching._utils import _apply_exact_matching
 from cohortmatch.utils.logging import get_logger
 
-# Create a logger for this module
 logger = get_logger(__name__)
 
 
@@ -23,118 +31,111 @@ def optimal_match(
     ratio: float = 1.0,
     replace: bool = False,
 ) -> tuple[dict[int, list[int]], list[float]]:
-    """Implement optimal matching algorithm using the Hungarian algorithm.
-    The algorithm takes a distance matrix between treatment and control units and
-    finds the optimal matching that minimizes the total distance. Indices in the
-    returned dictionary are positions in the arrays of treatment and control units,
-    not original dataframe indices. The pipeline translates these to
-    participant IDs.
+    """Optimal matching that minimizes total distance.
 
-    Ratio matching is implemented using one of two strategies:
-    - With replacement (`replace=True`): The control unit matrix is tiled `ratio` times,
-      allowing controls to be matched multiple times across the larger matrix.
-    - Without replacement (`replace=False`): The matching algorithm is run iteratively,
-      removing used controls from the pool in each iteration until the desired
-      ratio is achieved or no more matches can be found.
+    Indices in the returned dictionary are positions in the arrays of treatment
+    and control units, not original dataframe indices; the pipeline translates
+    these to participant IDs.
+
+    Without replacement (default) the result is a true 1:k minimum-cost matching
+    with each control used at most once. With replacement each treated unit
+    independently takes its k nearest permitted controls, and controls may be
+    reused across treated units.
 
     Args:
-        data: DataFrame containing the data
-        distance_matrix: Pre-computed and pre-calipered distance matrix (n_treatment x n_control)
-        treat_mask: Boolean mask indicating treatment units
-        exact_match_cols: Columns to match exactly on
-        ratio: Matching ratio (e.g., 2 means 1:2 matching)
-        replace: Whether to allow replacement in matching
+        data: DataFrame containing the data (used only for exact matching).
+        distance_matrix: Pre-computed, pre-calipered distance matrix
+            (n_treatment x n_control); forbidden pairs are +inf.
+        treat_mask: Boolean mask indicating treatment units.
+        exact_match_cols: Columns to match exactly on.
+        ratio: Matching ratio (e.g. 2 means 1:2 matching).
+        replace: Whether controls may be reused across treated units.
+
     Returns:
-        Tuple of (match_pairs, match_distances)
+        Tuple of (match_pairs, match_distances).
     """
     logger.info(f"Starting optimal matching (replace={replace}, ratio={ratio})")
     n_treat, n_control = distance_matrix.shape
-    treat_indices = np.where(treat_mask)[0]
 
-    # Create working copy of distance matrix and apply exact matching
+    # Working copy; exact matching marks forbidden pairs as +inf
     distances = distance_matrix.copy()
     if exact_match_cols:
         logger.debug(f"Applying exact matching on columns: {exact_match_cols}")
+        treat_indices = np.where(treat_mask)[0]
         control_indices = np.where(~treat_mask)[0]
         distances = _apply_exact_matching(
             data, treat_indices, control_indices, distances, exact_match_cols
         )
 
-    # Initialize match storage
-    match_pairs: dict[int, list[int]] = {i: [] for i in range(n_treat)}
-    match_distances: list[float] = []
-
-    # Replace inf with a large finite value for the solver
-    finite_distances = distances[~np.isinf(distances)]
-    if finite_distances.size == 0:
+    permitted = np.isfinite(distances)
+    if not permitted.any():
         logger.warning(
             "No finite distances available for matching. No pairs will be found."
         )
-        return {}, []  # Return empty matches
+        return {}, []
 
-    max_finite = np.nanmax(finite_distances)
+    k = max(1, int(ratio))
+    match_pairs: dict[int, list[int]] = {i: [] for i in range(n_treat)}
+    match_distances: list[float] = []
 
     if replace:
-        # --- WITH REPLACEMENT: Use matrix tiling ---
-        n_copies = int(ratio)
-        if n_copies > 1:
-            logger.debug(
-                f"Implementing {ratio}:1 matching by tiling control matrix {n_copies} times."
-            )
-            solver_distances = np.tile(distances, (1, n_copies))
-        else:
-            solver_distances = distances.copy()
-
-        solver_distances[np.isinf(solver_distances) | np.isnan(solver_distances)] = (
-            max_finite * 1e6
-        )
-
-        row_ind, col_ind = linear_sum_assignment(solver_distances)
-
-        # Process matches, mapping tiled columns back to original
-        for r, c in zip(row_ind, col_ind, strict=False):
-            if np.isinf(distances[r, c % n_control]):
+        # With replacement the problem separates across treated units: each one
+        # independently takes its k nearest permitted controls.
+        for t in range(n_treat):
+            cand = np.where(permitted[t])[0]
+            if cand.size == 0:
                 continue
-            original_c_idx = c % n_control
-            match_pairs[r].append(original_c_idx)
-            match_distances.append(distances[r, original_c_idx])
+            order = cand[np.argsort(distances[t, cand], kind="stable")][:k]
+            for c in order:
+                match_pairs[t].append(int(c))
+                match_distances.append(float(distances[t, c]))
+        logger.info(f"Optimal matching complete: {len(match_distances)} total matches")
+        return match_pairs, match_distances
 
-    else:
-        # --- WITHOUT REPLACEMENT: Use iterative solving ---
-        solver_distances = distances.copy()
-        solver_distances[np.isinf(solver_distances) | np.isnan(solver_distances)] = (
-            max_finite * 1e6
-        )
-        used_controls = np.zeros(n_control, dtype=bool)
+    # --- without replacement: true 1:k minimum-cost matching ----------------
+    # Duplicate each treated unit into k row-slots; columns are the real
+    # controls plus one dedicated dummy no-match column per row-slot.
+    n_rows = n_treat * k
+    max_finite = float(distances[permitted].max())
+    # Shift real weights strictly positive: the sparse matcher treats an
+    # explicit 0 as "no edge", and a uniform shift never changes which
+    # assignment is optimal.
+    eps = 1.0
+    # A dummy edge must cost more than any all-real assignment, so the solver
+    # prefers real matches and only falls back to a dummy when a slot cannot be
+    # matched at all.
+    dummy_cost = n_rows * (max_finite + eps) + 1.0
 
-        for i in range(int(ratio)):
-            logger.debug(f"Matching iteration {i + 1}/{int(ratio)}")
-            if np.any(used_controls):
-                solver_distances[:, used_controls] = max_finite * 1e6
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[float] = []
+    for t in range(n_treat):
+        cand = np.where(permitted[t])[0]
+        for slot in range(k):
+            r = t * k + slot
+            for c in cand:
+                rows.append(r)
+                cols.append(int(c))
+                vals.append(float(distances[t, c]) + eps)
+            rows.append(r)
+            cols.append(n_control + r)  # this slot's dedicated dummy column
+            vals.append(dummy_cost)
 
-            row_ind, col_ind = linear_sum_assignment(solver_distances)
+    graph = csr_matrix((vals, (rows, cols)), shape=(n_rows, n_control + n_rows))
+    row_ind, col_ind = min_weight_full_bipartite_matching(graph)
 
-            new_matches_found = 0
-            for r, c in zip(row_ind, col_ind, strict=False):
-                if np.isinf(distances[r, c]) or used_controls[c]:
-                    continue
+    for r, c in zip(row_ind, col_ind, strict=False):
+        if c >= n_control:
+            continue  # matched to its dummy -> this slot stays unmatched
+        t = r // k
+        match_pairs[t].append(int(c))
+        match_distances.append(float(distances[t, c]))
 
-                match_pairs[r].append(c)
-                match_distances.append(distances[r, c])
-                used_controls[c] = True
-                new_matches_found += 1
-
-            if new_matches_found == 0:
-                logger.info(f"No further matches found on iteration {i + 1}. Stopping.")
-                break
-
-    total_matches = sum(len(v) for v in match_pairs.values())
-    logger.info(f"Optimal matching complete: {total_matches} total matches found")
+    logger.info(f"Optimal matching complete: {len(match_distances)} total matches")
     if match_distances:
         logger.debug(
             f"Match distances - min: {min(match_distances):.4f}, "
             f"mean: {np.mean(match_distances):.4f}, "
             f"max: {max(match_distances):.4f}"
         )
-
     return match_pairs, match_distances

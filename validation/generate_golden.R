@@ -28,6 +28,25 @@ smd_from_baltab <- function(bal, col) {
   as.list(smd[covs])
 }
 
+# Rubin's B and R on the propensity linear predictor over the matched sample,
+# weighted, matching cohortmatch.metrics.balance.rubin_b_r exactly.
+rubin_br <- function(md) {
+  ps <- lalonde[md$id, "ps"]
+  lp <- qlogis(pmin(pmax(ps, 1e-6), 1 - 1e-6))
+  w <- md$weights
+  tr <- md$treat == 1
+  wm <- function(x, ww) sum(ww * x) / sum(ww)
+  wv <- function(x, ww) {
+    m <- wm(x, ww)
+    sum(ww * (x - m)^2) / sum(ww)
+  }
+  mt <- wm(lp[tr], w[tr])
+  mc <- wm(lp[!tr], w[!tr])
+  vt <- wv(lp[tr], w[tr])
+  vc <- wv(lp[!tr], w[!tr])
+  list(rubin_B = 100 * abs(mt - mc) / sqrt((vt + vc) / 2), rubin_R = vt / vc)
+}
+
 design_block <- function(m.out) {
   md <- match.data(m.out, data = lalonde)
   bal <- bal.tab(m.out, un = TRUE, binary = "std", s.d.denom = "treated")
@@ -45,6 +64,7 @@ design_block <- function(m.out) {
       }
     }
   }
+  br <- rubin_br(md)
   list(
     n_treated = sum(md$treat == 1),
     n_control = sum(md$treat == 0),
@@ -53,13 +73,18 @@ design_block <- function(m.out) {
     smd_after = smd_from_baltab(bal, "Diff.Adj"),
     att = unname(ct["treat", "Estimate"]),
     att_se = unname(ct["treat", "Std. Error"]),
-    total_ps_distance = pair_dist
+    total_ps_distance = pair_dist,
+    rubin_B = br$rubin_B,
+    rubin_R = br$rubin_R
   )
 }
 
 golden <- list(
   ps = setNames(as.list(lalonde$ps), lalonde$id),
   sd_ps = sd(lalonde$ps),
+  # MatchIt's std.caliper on the logit linear predictor: 0.2 x SD of the
+  # logit propensity over the full sample.
+  auto_caliper = 0.2 * sd(qlogis(lalonde$ps)),
   covariates = covs,
   unadjusted_smd = smd_from_baltab(
     bal.tab(form, data = lalonde, binary = "std", s.d.denom = "treated"),
@@ -92,14 +117,14 @@ golden <- list(
       md <- match.data(m, data = lalonde)
       bal <- bal.tab(m, un = TRUE, binary = "std", s.d.denom = "treated")
       fit <- lm(re78 ~ treat, data = md, weights = weights)
-      ct <- coeftest(fit, vcov. = vcovHC(fit, type = "HC1"))
+      ct3 <- coeftest(fit, vcov. = vcovHC(fit, type = "HC3"))
       list(
         n_treated = sum(md$treat == 1),
         n_control = sum(md$treat == 0),
         sum_weights_control = sum(md$weights[md$treat == 0]),
         smd_after = smd_from_baltab(bal, "Diff.Adj"),
-        att = unname(ct["treat", "Estimate"]),
-        att_se = unname(ct["treat", "Std. Error"])
+        att = unname(ct3["treat", "Estimate"]),
+        att_se_hc3 = unname(ct3["treat", "Std. Error"])
       )
     }),
     nearest_mahalanobis = local({

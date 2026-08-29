@@ -106,13 +106,16 @@ robust SE (about 15% on the sandwich test's data). The var_weights sandwich is
 pinned to a hand computation in
 tests/test_api.py::test_glm_var_weights_sandwich. statsmodels emits a
 SpecificationWarning for var_weights with a robust covariance; it is verified
-safe here and suppressed. statsmodels' GLM `cov_type="HC1"` returns HC0 (no
-n/(n-k) factor), so GLM robust SEs are HC0-equivalent, about 0.16% smaller than
-R's vcovHC(HC1) at n=614; the point estimate matches R exactly (golden
-test_logistic_effect_reconciles). Standard errors are cluster-robust on match
-groups without replacement (Abadie & Spiess 2022 justifies pair clustering) and
-HC1 with replacement and for stratum designs, where a handful of strata are too
-few clusters. The row bootstrap is invalid for matched samples (Abadie & Imbens
+safe here and suppressed. statsmodels' GLM sandwich is HC0 for every requested
+HCx variant (no n/(n-k) factor), so the GLM path uses and labels HC0 directly;
+it is about 0.16% smaller than R's vcovHC(HC1) at n=614, and the point estimate
+matches R exactly (golden test_logistic_effect_reconciles). Standard errors are
+cluster-robust on match groups without replacement (Abadie & Spiess 2022
+justifies pair clustering) and heteroskedasticity-robust otherwise -- HC3 for
+the weighted linear model (MatchIt's recommendation for non-paired analyses),
+HC0 for the GLM -- with replacement and for stratum designs, where a handful of
+strata are too few clusters. Cluster-robust SEs on fewer than ten match groups
+emit a warning, since the sandwich is anti-conservative with few clusters. The row bootstrap is invalid for matched samples (Abadie & Imbens
 2008) and was removed. Nonlinear families fit the treatment-only model, so
 every reported ratio is marginal and the non-collapsibility trap cannot occur.
 Binary outcomes under the linear family are labeled risk_difference. The E-value

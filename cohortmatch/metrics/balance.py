@@ -300,6 +300,44 @@ def calculate_rubin_rules(
     }
 
 
+def rubin_b_r(
+    propensity_scores: np.ndarray,
+    treated: np.ndarray,
+    weights: np.ndarray | None = None,
+) -> dict[str, float | bool]:
+    """Rubin's (2001) B and R on the propensity-score linear predictor.
+
+    B is the absolute standardized difference in the mean linear propensity
+    (logit) between groups, as a percentage; Rubin's target is |B| < 25. R is
+    the ratio of the groups' linear-propensity variances; the target is
+    0.5 < R < 2. Both use the matching weights and are computed on the sample
+    passed in (the matched sample, when used post-matching).
+    """
+    ps = np.clip(np.asarray(propensity_scores, dtype=float), 1e-6, 1 - 1e-6)
+    lp = np.log(ps / (1 - ps))
+    treated = np.asarray(treated, dtype=bool)
+    w = np.ones_like(lp) if weights is None else np.asarray(weights, dtype=float)
+
+    lp_t, w_t = lp[treated], w[treated]
+    lp_c, w_c = lp[~treated], w[~treated]
+    if w_t.sum() == 0 or w_c.sum() == 0:
+        return {"rubin_B": np.nan, "rubin_R": np.nan, "B_ok": False, "R_ok": False}
+
+    mt, mc = np.average(lp_t, weights=w_t), np.average(lp_c, weights=w_c)
+    vt = np.average((lp_t - mt) ** 2, weights=w_t)
+    vc = np.average((lp_c - mc) ** 2, weights=w_c)
+
+    pooled_sd = np.sqrt((vt + vc) / 2)
+    b = 100.0 * abs(mt - mc) / pooled_sd if pooled_sd > 0 else np.nan
+    r = vt / vc if vc > 0 else np.nan
+    return {
+        "rubin_B": float(b),
+        "rubin_R": float(r),
+        "B_ok": bool(np.isfinite(b) and b < 25),
+        "R_ok": bool(np.isfinite(r) and 0.5 < r < 2),
+    }
+
+
 def calculate_balance_index(balance_df: pd.DataFrame) -> dict[str, float]:
     """Summary of balance improvement based on |SMD| before vs after."""
     abs_before = balance_df["smd_before"].abs()
